@@ -1,0 +1,86 @@
+@import "tailwindcss";
+@source "../components/**/*.{ts,tsx}";
+@source "./**/*.{ts,tsx}";
+
+:root {
+  color-scheme: light;
+  --navy: #0f172a;
+  --gold: #b7791f;
+  --cream: #f8fafc;
+  --ring: rgba(15, 23, 42, 0.08);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  background: var(--cream);
+  color: var(--navy);
+  font-family: var(--font-sans), Inter, system-ui, -apple-system, Segoe UI, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+::selection {
+  background: #fde68a;
+  color: #0f172a;
+}
+
+:focus-visible {
+  outline: 2px solid #f59e0b;
+  outline-offset: 2px;
+}
+
+/* Landing hero mesh */
+.hero-mesh {
+  background:
+    radial-gradient(ellipse 80% 60% at 10% 0%, rgba(251, 191, 36, 0.12), transparent 55%),
+    radial-gradient(ellipse 70% 50% at 90% 10%, rgba(59, 130, 246, 0.08), transparent 50%),
+    linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+}
+
+/* Admin content card */
+.admin-card {
+  border-radius: 1rem;
+  border: 1px solid #e2e8f0;
+  background: white;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+}
+
+/* Public bottom safe area for mobile nav */
+.pb-safe-mobile {
+  padding-bottom: 5.5rem;
+}
+
+@media (min-width: 640px) {
+  .pb-safe-mobile {
+    padding-bottom: 0;
+  }
+}

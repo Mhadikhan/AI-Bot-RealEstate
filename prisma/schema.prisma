@@ -1,0 +1,398 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+enum LeadType {
+  BUYER
+  TENANT
+  INVESTOR
+  SELLER
+  LANDLORD
+  VIEWING
+  CALLBACK
+}
+
+enum LeadTemperature {
+  HOT
+  WARM
+  COLD
+}
+
+enum LeadStatus {
+  NEW
+  CONTACTED
+  QUALIFIED
+  VIEWING_SCHEDULED
+  FOLLOW_UP_REQUIRED
+  NEGOTIATION
+  CONVERTED
+  LOST
+  ARCHIVED
+}
+
+enum ListingPurpose {
+  SALE
+  RENT
+}
+
+enum PropertyCategory {
+  READY
+  OFF_PLAN
+}
+
+enum PropertyStatus {
+  DRAFT
+  ACTIVE
+  RESERVED
+  SOLD
+  RENTED
+  ARCHIVED
+}
+
+enum CampaignMode {
+  LIVE
+  DEMO
+}
+
+enum BroadcastStatus {
+  DRAFT
+  SCHEDULED
+  SENDING
+  SENT
+  PARTIAL
+  FAILED
+  CANCELLED
+}
+
+enum BroadcastRecipientStatus {
+  QUEUED
+  SUBMITTED
+  SENT
+  DELIVERED
+  READ
+  FAILED
+  SIMULATED
+  MANUAL
+  PENDING
+}
+
+enum CampaignCategory {
+  NEW_PROPERTY_ALERT
+  RENTAL_LISTING_UPDATE
+  OFF_PLAN_ANNOUNCEMENT
+  VIEWING_REMINDER
+  OPEN_HOUSE_INVITE
+  COLD_LEAD_REACTIVATION
+  INVESTOR_CAMPAIGN
+  PAYMENT_PLAN_UPDATE
+  BROCHURE_CAMPAIGN
+  CALLBACK_FOLLOW_UP
+  AGENT_FOLLOW_UP
+  CUSTOM
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  name         String
+  role         String   @default("ADMIN")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+model Agent {
+  id          String   @id @default(cuid())
+  name        String
+  email       String   @unique
+  phone       String
+  whatsapp    String?
+  languages   String[]
+  active      Boolean  @default(true)
+  leads       Lead[]
+  bookings    ViewingBooking[]
+  properties  Property[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model Lead {
+  id                   String          @id @default(cuid())
+  type                 LeadType
+  name                 String?
+  phone                String?
+  email                String?
+  budgetMin            Int?
+  budgetMax            Int?
+  preferredArea        String?
+  preferredPropertyType String?
+  bedrooms             String?
+  timeline             String?
+  paymentPreference    String?
+  score                Int             @default(0)
+  temperature          LeadTemperature @default(COLD)
+  scoreReason          String[]
+  status               LeadStatus      @default(NEW)
+  source               String          @default("Website Chatbot")
+  requiresHumanFollowUp Boolean         @default(false)
+  whatsappOptIn        Boolean         @default(true)
+  whatsappOptInAt      DateTime?
+  tags                 String[]        @default([])
+  propertyCategoryPreference PropertyCategory?
+  agentId              String?
+  agent                Agent?          @relation(fields: [agentId], references: [id])
+  conversation         Conversation?
+  bookings             ViewingBooking[]
+  broadcastRecipients  BroadcastRecipient[]
+  inboundMessages    WhatsAppInboundMessage[]
+  followUpEnrollments FollowUpEnrollment[]
+  createdAt            DateTime        @default(now())
+  updatedAt            DateTime        @updatedAt
+
+  @@index([temperature])
+  @@index([status])
+  @@index([createdAt])
+  @@index([agentId])
+  @@index([whatsappOptIn])
+}
+
+model Conversation {
+  id        String        @id @default(cuid())
+  leadId    String        @unique
+  lead      Lead          @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  messages  ChatMessage[]
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+}
+
+model ChatMessage {
+  id             String       @id @default(cuid())
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sender         String
+  text           String
+  createdAt      DateTime     @default(now())
+}
+
+model Property {
+  id             String           @id @default(cuid())
+  ref            String           @unique
+  title          String
+  slug           String           @unique
+  description    String
+  listingPurpose ListingPurpose
+  category       PropertyCategory
+  propertyType   String
+  city           String           @default("Karachi")
+  area           String
+  community      String?
+  developer      String?
+  price          Int
+  currency       String           @default("PKR")
+  bedrooms       String
+  bathrooms      Int
+  sizeSqFt       Int
+  furnishing     String?
+  paymentPlan    String?
+  handoverDate   DateTime?
+  availability   String           @default("Available")
+  featuredImage  String?
+  status         PropertyStatus   @default(ACTIVE)
+  featured       Boolean          @default(false)
+  agentId        String?
+  agent          Agent?           @relation(fields: [agentId], references: [id])
+  bookings       ViewingBooking[]
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+
+  @@index([status])
+  @@index([listingPurpose])
+  @@index([propertyType])
+  @@index([area])
+  @@index([price])
+  @@index([bedrooms])
+}
+
+model ViewingBooking {
+  id          String   @id @default(cuid())
+  reference   String   @unique
+  leadId      String?
+  lead        Lead?    @relation(fields: [leadId], references: [id])
+  propertyId  String
+  property    Property @relation(fields: [propertyId], references: [id])
+  agentId     String?
+  agent       Agent?   @relation(fields: [agentId], references: [id])
+  name        String
+  phone       String
+  email       String?
+  preferredAt DateTime
+  notes       String?
+  status      String   @default("PENDING")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model FAQ {
+  id        String   @id @default(cuid())
+  category  String
+  question  String
+  answer    String
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Notification {
+  id        String   @id @default(cuid())
+  type      String
+  title     String
+  message   String
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now())
+}
+
+model Broadcast {
+  id               String           @id @default(cuid())
+  title            String
+  message          String
+  category         CampaignCategory @default(CUSTOM)
+  status           BroadcastStatus  @default(DRAFT)
+  mode             CampaignMode     @default(DEMO)
+  audience         String           @default("OPTED_IN")
+  audienceFilters  Json?
+  recipientCount   Int              @default(0)
+  sentCount        Int              @default(0)
+  failedCount      Int              @default(0)
+  manualCount      Int              @default(0)
+  deliveredCount   Int              @default(0)
+  readCount        Int              @default(0)
+  replyCount       Int              @default(0)
+  scheduledAt      DateTime?
+  sentAt           DateTime?
+  completedAt      DateTime?
+  propertyRef      String?
+  followUpSequenceId String?
+  followUpSequence FollowUpSequence? @relation(fields: [followUpSequenceId], references: [id])
+  recipients       BroadcastRecipient[]
+  webhookEvents    WhatsAppWebhookEvent[]
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+
+  @@index([status])
+  @@index([mode])
+  @@index([category])
+  @@index([createdAt])
+  @@index([scheduledAt])
+}
+
+model BroadcastRecipient {
+  id                  String                   @id @default(cuid())
+  broadcastId         String
+  broadcast           Broadcast                @relation(fields: [broadcastId], references: [id], onDelete: Cascade)
+  leadId              String?
+  lead                Lead?                    @relation(fields: [leadId], references: [id])
+  phone               String
+  name                String?
+  personalizedMessage String?
+  status              BroadcastRecipientStatus @default(QUEUED)
+  externalId          String?
+  error               String?
+  sentAt              DateTime?
+  deliveredAt         DateTime?
+  readAt              DateTime?
+  repliedAt           DateTime?
+  createdAt           DateTime                 @default(now())
+  webhookEvents       WhatsAppWebhookEvent[]
+
+  @@index([broadcastId])
+  @@index([status])
+  @@index([externalId])
+  @@index([phone])
+}
+
+model WhatsAppWebhookEvent {
+  id          String   @id @default(cuid())
+  broadcastId String?
+  broadcast   Broadcast? @relation(fields: [broadcastId], references: [id], onDelete: SetNull)
+  recipientId String?
+  recipient   BroadcastRecipient? @relation(fields: [recipientId], references: [id], onDelete: SetNull)
+  leadId      String?
+  eventType   String
+  waMessageId String?
+  payload     Json
+  createdAt   DateTime @default(now())
+
+  @@index([eventType])
+  @@index([waMessageId])
+  @@index([createdAt])
+}
+
+model WhatsAppInboundMessage {
+  id              String   @id @default(cuid())
+  fromPhone       String
+  text            String
+  waMessageId     String?  @unique
+  leadId          String?
+  lead            Lead?    @relation(fields: [leadId], references: [id])
+  handledBy       String   @default("PENDING")
+  aiReply         String?
+  requiresAgent   Boolean  @default(false)
+  agentNotifiedAt DateTime?
+  createdAt       DateTime @default(now())
+
+  @@index([fromPhone])
+  @@index([handledBy])
+  @@index([createdAt])
+}
+
+model FollowUpSequence {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  active      Boolean  @default(true)
+  steps       FollowUpStep[]
+  enrollments FollowUpEnrollment[]
+  campaigns   Broadcast[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model FollowUpStep {
+  id              String           @id @default(cuid())
+  sequenceId      String
+  sequence        FollowUpSequence @relation(fields: [sequenceId], references: [id], onDelete: Cascade)
+  stepOrder       Int
+  delayHours      Int
+  messageTemplate String
+  triggerCondition String          @default("NO_REPLY")
+  active          Boolean          @default(true)
+  createdAt       DateTime         @default(now())
+
+  @@unique([sequenceId, stepOrder])
+}
+
+model FollowUpEnrollment {
+  id              String           @id @default(cuid())
+  sequenceId      String
+  sequence        FollowUpSequence @relation(fields: [sequenceId], references: [id], onDelete: Cascade)
+  leadId          String
+  lead            Lead             @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  broadcastId     String?
+  currentStep     Int              @default(0)
+  status          String           @default("ACTIVE")
+  nextRunAt       DateTime?
+  lastSentAt      DateTime?
+  stoppedReason   String?
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  @@index([status])
+  @@index([nextRunAt])
+  @@index([leadId])
+}

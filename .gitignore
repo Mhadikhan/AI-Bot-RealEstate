@@ -1,0 +1,13 @@
+node_modules
+.next
+.env
+.env.local
+.agents/
+.neon
+skills-lock.json
+*.log
+public/uploads/properties/*
+!public/uploads/properties/.gitkeep
+public/uploads/logos/*
+!public/uploads/logos/.gitkeep
+data/brand-settings.json

@@ -1,0 +1,84 @@
+{
+  "broadcasts": [
+    {
+      "id": "bc_1780309542843_a6eiolw",
+      "title": "Property update",
+      "message": "Hi {{name}}, we have a new property that may match your search. Reply to this message and our team will share details and arrange a viewing.",
+      "status": "SENT",
+      "audience": "ALL_PHONES",
+      "recipientCount": 2,
+      "sentCount": 0,
+      "failedCount": 0,
+      "manualCount": 2,
+      "sentAt": "2026-06-01T10:25:42.843Z",
+      "createdAt": "2026-06-01T10:25:42.843Z",
+      "updatedAt": "2026-06-01T10:25:42.843Z",
+      "recipients": [
+        {
+          "id": "bc_1780309542843_1fpktis",
+          "broadcastId": "bc_1780309542843_a6eiolw",
+          "leadId": "cmpu03lfn0004kzhkp0vs0pok",
+          "phone": "03412879311",
+          "name": null,
+          "status": "MANUAL",
+          "externalId": null,
+          "error": null,
+          "sentAt": null,
+          "createdAt": "2026-06-01T10:25:42.843Z"
+        },
+        {
+          "id": "bc_1780309542843_keu6hz1",
+          "broadcastId": "bc_1780309542843_a6eiolw",
+          "leadId": "cmptx37t3000okzp84e6e2dbm",
+          "phone": "+923009999999",
+          "name": "Demo Buyer",
+          "status": "MANUAL",
+          "externalId": null,
+          "error": null,
+          "sentAt": null,
+          "createdAt": "2026-06-01T10:25:42.843Z"
+        }
+      ]
+    },
+    {
+      "id": "bc_1780309471273_61zmdcf",
+      "title": "Test Campaign",
+      "message": "Hi {{name}}, welcome!",
+      "status": "DRAFT",
+      "audience": "ALL_PHONES",
+      "recipientCount": 2,
+      "sentCount": 0,
+      "failedCount": 0,
+      "manualCount": 0,
+      "sentAt": null,
+      "createdAt": "2026-06-01T10:24:31.273Z",
+      "updatedAt": "2026-06-01T10:24:31.273Z",
+      "recipients": [
+        {
+          "id": "bc_1780309471273_j1k0kgk",
+          "broadcastId": "bc_1780309471273_61zmdcf",
+          "leadId": "cmpu03lfn0004kzhkp0vs0pok",
+          "phone": "03412879311",
+          "name": null,
+          "status": "PENDING",
+          "externalId": null,
+          "error": null,
+          "sentAt": null,
+          "createdAt": "2026-06-01T10:24:31.273Z"
+        },
+        {
+          "id": "bc_1780309471273_in86s8c",
+          "broadcastId": "bc_1780309471273_61zmdcf",
+          "leadId": "cmptx37t3000okzp84e6e2dbm",
+          "phone": "+923009999999",
+          "name": "Demo Buyer",
+          "status": "PENDING",
+          "externalId": null,
+          "error": null,
+          "sentAt": null,
+          "createdAt": "2026-06-01T10:24:31.273Z"
+        }
+      ]
+    }
+  ]
+}
