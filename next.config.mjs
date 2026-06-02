@@ -8,8 +8,9 @@ const nextConfig = {
   outputFileTracingRoot: __dirname,
   experimental: {
     serverActions: {
-      bodySizeLimit: "2mb"
-    }
+      bodySizeLimit: "1gb"
+    },
+    proxyClientMaxBodySize: "1gb"
   }
 };
 export default nextConfig;

@@ -18,10 +18,12 @@ import {
   LayoutDashboard,
   Megaphone,
   MessageSquare,
+  PhoneForwarded,
   PieChart,
   Play,
   PlusCircle,
   RefreshCw,
+  Search,
   Send,
   Settings,
   Sparkles,
@@ -40,6 +42,7 @@ import {
 } from "../lib/broadcast";
 import type { BrandSettings } from "../lib/brand-settings";
 import AudienceFilterPanel from "./AudienceFilterPanel";
+import QuickSendPanel from "./QuickSendPanel";
 import { useToast } from "./ToastProvider";
 import { buildCampaignRequestBody } from "../lib/campaign-payload";
 import { EMPTY_CRM_FILTERS, type CrmAudienceFilters } from "../lib/audience-filters";
@@ -47,6 +50,7 @@ import { EMPTY_CRM_FILTERS, type CrmAudienceFilters } from "../lib/audience-filt
 type WaSection =
   | "overview"
   | "create"
+  | "quick-send"
   | "history"
   | "templates"
   | "segments"
@@ -71,6 +75,8 @@ type LeadRow = {
 type PlatformStatus = {
   configured: boolean;
   mode: "LIVE" | "DEMO";
+  provider?: "meta" | "green-api" | "none";
+  providerLabel?: string;
   webhookUrl: string;
   verifyTokenSet: boolean;
 };
@@ -118,6 +124,7 @@ type FollowUpSeq = {
 const NAV: { id: WaSection; label: string; icon: typeof LayoutDashboard }[] = [
   { id: "overview", label: "Overview", icon: LayoutDashboard },
   { id: "create", label: "Create Broadcast", icon: PlusCircle },
+  { id: "quick-send", label: "Phone List Send", icon: PhoneForwarded },
   { id: "history", label: "Campaign History", icon: History },
   { id: "templates", label: "Message Templates", icon: FileText },
   { id: "segments", label: "Audience Segments", icon: Users },
@@ -156,6 +163,31 @@ const SEGMENT_IDS: BroadcastAudience[] = [
   "VIEWING_BOOKED",
   "AGENT_FOLLOW_UP"
 ];
+
+function campaignMatchesSearch(c: Campaign, q: string) {
+  const title = (c.title || "").toLowerCase();
+  const message = (c.message || "").toLowerCase();
+  const status = (c.status || "").toLowerCase();
+  const mode = (c.mode || "").toLowerCase();
+  const audience = (c.audience || "").toLowerCase();
+  const audienceLabel = (AUDIENCE_LABELS[c.audience as BroadcastAudience] || "").toLowerCase();
+  const categoryKey = (c.category || "").toLowerCase();
+  const categoryLabel = c.category
+    ? (CAMPAIGN_CATEGORY_LABELS[c.category as CampaignCategory] || c.category).toLowerCase()
+    : "";
+
+  return (
+    title.includes(q) ||
+    message.includes(q) ||
+    status.includes(q) ||
+    mode.includes(q) ||
+    audience.includes(q) ||
+    audienceLabel.includes(q) ||
+    categoryKey.includes(q) ||
+    categoryLabel.includes(q) ||
+    (c.followUpSequence?.name || "").toLowerCase().includes(q)
+  );
+}
 
 function StatusBadge({ status, mode }: { status: string; mode?: string }) {
   const labels: Record<string, string> = {
@@ -248,12 +280,7 @@ export default function WhatsAppCampaigns({
   const filteredHistory = useMemo(() => {
     const q = historySearch.trim().toLowerCase();
     if (!q) return campaigns;
-    return campaigns.filter(
-      (c) =>
-        c.title.toLowerCase().includes(q) ||
-        c.message.toLowerCase().includes(q) ||
-        (c.category && CAMPAIGN_CATEGORY_LABELS[c.category as CampaignCategory]?.toLowerCase().includes(q))
-    );
+    return campaigns.filter((c) => campaignMatchesSearch(c, q));
   }, [campaigns, historySearch]);
 
   const totals = useMemo(
@@ -547,6 +574,19 @@ export default function WhatsAppCampaigns({
             />
           )}
 
+          {section === "quick-send" && (
+            <QuickSendPanel
+              settings={settings}
+              platform={platform}
+              sending={sending}
+              onSendingChange={setSending}
+              onSent={() => {
+                loadAll();
+                setSection("history");
+              }}
+            />
+          )}
+
           {section === "create" && (
             <CreateBroadcastPanel
               settings={settings}
@@ -578,6 +618,7 @@ export default function WhatsAppCampaigns({
           {section === "history" && (
             <CampaignHistoryPanel
               campaigns={filteredHistory}
+              totalCount={campaigns.length}
               search={historySearch}
               onSearch={setHistorySearch}
               activeId={activeId}
@@ -629,7 +670,14 @@ export default function WhatsAppCampaigns({
           )}
 
           {section === "conversations" && (
-            <ConversationsPanel settings={settings} inbound={inbound} onRefresh={loadAll} />
+            <ConversationsPanel
+              settings={settings}
+              platform={platform}
+              inbound={inbound}
+              leads={leads}
+              onRefresh={loadAll}
+              onOpenSettings={() => setSection("settings")}
+            />
           )}
 
           {section === "analytics" && (
@@ -664,6 +712,7 @@ export default function WhatsAppCampaigns({
                 toast.success("Webhook URL copied to clipboard.");
                 setTimeout(() => setCopied(false), 1500);
               }}
+              onRefresh={loadAll}
             />
           )}
         </main>
@@ -925,6 +974,7 @@ function CreateBroadcastPanel(props: {
 
 function CampaignHistoryPanel({
   campaigns,
+  totalCount,
   search,
   onSearch,
   activeId,
@@ -932,26 +982,55 @@ function CampaignHistoryPanel({
   onOpenAnalytics
 }: {
   campaigns: Campaign[];
+  totalCount: number;
   search: string;
   onSearch: (v: string) => void;
   activeId: string | null;
   onSelect: (id: string) => void;
   onOpenAnalytics: (id: string) => void;
 }) {
+  const query = search.trim();
+  const hasFilter = query.length > 0;
+
   return (
     <div className="rounded-2xl border border-slate-200 bg-white shadow-sm">
       <div className="border-b border-slate-100 p-4">
         <PanelHeader title="Campaign History" subtitle="All broadcasts sent or simulated" />
-        <input
-          value={search}
-          onChange={(e) => onSearch(e.target.value)}
-          placeholder="Search campaigns…"
-          className="mt-3 w-full rounded-xl border border-slate-200 px-4 py-2 text-sm"
-        />
+        <div className="relative mt-3">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+          <input
+            type="search"
+            value={search}
+            onChange={(e) => onSearch(e.target.value)}
+            placeholder="Search by title, status, type, audience…"
+            className="w-full rounded-xl border border-slate-200 py-2.5 pl-10 pr-10 text-sm outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-100"
+            aria-label="Search campaigns"
+          />
+          {hasFilter && (
+            <button
+              type="button"
+              onClick={() => onSearch("")}
+              className="absolute right-2 top-1/2 -translate-y-1/2 rounded-lg px-2 py-1 text-xs font-bold text-slate-500 hover:bg-slate-100"
+            >
+              Clear
+            </button>
+          )}
+        </div>
+        {totalCount > 0 && (
+          <p className="mt-2 text-xs text-slate-500">
+            {hasFilter
+              ? `Showing ${campaigns.length} of ${totalCount} campaign${totalCount === 1 ? "" : "s"}`
+              : `${totalCount} campaign${totalCount === 1 ? "" : "s"}`}
+          </p>
+        )}
       </div>
       <div className="max-h-[32rem] divide-y divide-slate-100 overflow-y-auto">
-        {campaigns.length === 0 ? (
-          <p className="p-8 text-center text-sm text-slate-500">No campaigns found.</p>
+        {totalCount === 0 ? (
+          <p className="p-8 text-center text-sm text-slate-500">No campaigns yet. Create one under Create Broadcast.</p>
+        ) : campaigns.length === 0 ? (
+          <p className="p-8 text-center text-sm text-slate-500">
+            No campaigns match &ldquo;{query}&rdquo;. Try title, status (e.g. SENT), or category.
+          </p>
         ) : (
           campaigns.map((c) => (
             <div
@@ -1191,71 +1270,277 @@ function AutomationsPanel({
 
 function ConversationsPanel({
   settings,
+  platform,
   inbound,
-  onRefresh
+  leads,
+  onRefresh,
+  onOpenSettings
 }: {
   settings: BrandSettings;
+  platform: PlatformStatus | null;
   inbound: InboundMsg[];
+  leads: LeadRow[];
   onRefresh: () => void;
+  onOpenSettings: () => void;
 }) {
   const toast = useToast();
+  const [loading, setLoading] = useState(false);
+  const [fromPhone, setFromPhone] = useState("");
+  const [simulateText, setSimulateText] = useState("Hi, I am interested in your DHA listing. Is it still available?");
+
+  const leadsWithPhone = useMemo(() => leads.filter((l) => l.phone?.trim()), [leads]);
+
+  useEffect(() => {
+    if (!fromPhone && leadsWithPhone[0]?.phone) {
+      setFromPhone(leadsWithPhone[0].phone!);
+    }
+  }, [fromPhone, leadsWithPhone]);
+
+  async function seedDemo() {
+    setLoading(true);
+    try {
+      const res = await fetch("/api/whatsapp/inbound", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "seed_demo", force: inbound.length > 0 })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Could not load demo conversations");
+      if (data.skipped) {
+        toast.info("Conversations already exist. Use simulate reply to add more.");
+      } else {
+        toast.success(`Loaded ${data.created || 0} demo conversation(s) with AI replies.`);
+      }
+      onRefresh();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function simulateReply() {
+    if (!fromPhone.trim() || !simulateText.trim()) {
+      toast.error("Select a contact and enter a message.");
+      return;
+    }
+    setLoading(true);
+    try {
+      const res = await fetch("/api/whatsapp/inbound", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "simulate", fromPhone: fromPhone.trim(), text: simulateText.trim() })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Simulate failed");
+      toast.success(data.handledBy === "AGENT" ? "Routed to agent queue." : "Inbound simulated — AI reply saved.");
+      setSimulateText("");
+      onRefresh();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed");
+    } finally {
+      setLoading(false);
+    }
+  }
+
   return (
-    <div className="rounded-2xl border border-slate-200 bg-white shadow-sm">
-      <div className="border-b border-slate-100 p-4">
-        <PanelHeader title="WhatsApp Conversations" subtitle="Inbound messages — AI replies and agent handover" />
-      </div>
-      <div className="divide-y divide-slate-100">
-        {inbound.length === 0 ? (
-          <p className="p-8 text-center text-sm text-slate-500">No conversations yet. Configure webhook in Settings.</p>
-        ) : (
-          inbound.map((msg) => (
-            <div key={msg.id} className="flex flex-wrap items-start justify-between gap-3 p-4">
-              <div>
-                <div className="font-bold">{msg.lead?.name || msg.fromPhone}</div>
-                <div className="mt-1 text-sm text-slate-700">{msg.text}</div>
-                {msg.aiReply && (
-                  <div className="mt-2 rounded-xl bg-emerald-50 p-2 text-xs text-emerald-900">
-                    <Bot className="mr-1 inline h-3 w-3" />
-                    {msg.aiReply}
-                  </div>
-                )}
-                <div className="mt-1 text-[10px] text-slate-400">{new Date(msg.createdAt).toLocaleString()}</div>
-              </div>
-              <div className="flex flex-col gap-2">
-                <span
-                  className={`rounded-full px-2 py-0.5 text-center text-[10px] font-bold ${
-                    msg.requiresAgent ? "bg-red-100 text-red-700" : "bg-slate-100"
-                  }`}
-                >
-                  {msg.handledBy}
-                </span>
-                {msg.requiresAgent && (
-                  <button
-                    type="button"
-                    onClick={async () => {
-                      const res = await fetch("/api/whatsapp/inbound", {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({ action: "assign_agent", messageId: msg.id })
-                      });
-                      if (res.ok) {
-                        toast.success("Agent assigned to conversation.");
-                        onRefresh();
-                      } else {
-                        toast.error("Could not assign agent.");
-                      }
-                    }}
-                    className="rounded-lg px-3 py-1.5 text-xs font-bold text-white"
-                    style={{ background: settings.primary }}
-                  >
-                    Assign agent
-                  </button>
-                )}
-              </div>
+    <div className="space-y-4">
+      <div className="rounded-2xl border border-slate-200 bg-white shadow-sm">
+        <div className="border-b border-slate-100 p-4">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <PanelHeader
+              title="WhatsApp Conversations"
+              subtitle="Inbound replies → AI advisor or agent handover (webhook in LIVE, simulate in DEMO)"
+            />
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                disabled={loading}
+                onClick={() => onRefresh()}
+                className="flex items-center gap-1 rounded-xl border border-slate-200 px-3 py-2 text-xs font-bold"
+              >
+                <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
+                Refresh
+              </button>
+              <button
+                type="button"
+                disabled={loading}
+                onClick={seedDemo}
+                className="rounded-xl px-3 py-2 text-xs font-bold text-white"
+                style={{ background: settings.primary }}
+              >
+                Load demo conversations
+              </button>
             </div>
-          ))
+          </div>
+        </div>
+
+        {inbound.length === 0 ? (
+          <div className="space-y-4 p-6">
+            <div className="rounded-2xl border border-dashed border-emerald-200 bg-emerald-50/50 p-5">
+              <div className="mb-2 flex items-center gap-2 font-bold text-emerald-900">
+                <Inbox className="h-5 w-5" />
+                Start the conversation workflow
+              </div>
+              <ol className="list-decimal space-y-2 pl-5 text-sm text-emerald-900/90">
+                <li>
+                  <strong>DEMO (now):</strong> Click <em>Load demo conversations</em> or simulate a reply below — AI
+                  responses are saved in the database (not sent to WhatsApp without LIVE credentials).
+                </li>
+                <li>
+                  <strong>LIVE:</strong> In{" "}
+                  <button type="button" onClick={onOpenSettings} className="font-bold underline">
+                    Settings
+                  </button>
+                  , copy the webhook URL into Meta Developer Console → WhatsApp → Configuration.
+                </li>
+                <li>Set <code className="rounded bg-white px-1">WHATSAPP_VERIFY_TOKEN</code> in `.env` to match Meta.</li>
+                <li>When a lead replies to a campaign, messages appear here with AI auto-reply or agent queue.</li>
+              </ol>
+            </div>
+
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+              <p className="mb-3 text-xs font-bold uppercase text-slate-500">Simulate inbound reply</p>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <label className="block text-xs font-semibold text-slate-600">
+                  From (lead phone)
+                  <select
+                    value={fromPhone}
+                    onChange={(e) => setFromPhone(e.target.value)}
+                    className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
+                  >
+                    <option value="">Select lead…</option>
+                    {leadsWithPhone.map((l) => (
+                      <option key={l.id} value={l.phone!}>
+                        {l.name || l.phone} · {l.type}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="block text-xs font-semibold text-slate-600 sm:col-span-2">
+                  Message
+                  <textarea
+                    value={simulateText}
+                    onChange={(e) => setSimulateText(e.target.value)}
+                    rows={2}
+                    className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
+                    placeholder="Lead's WhatsApp message…"
+                  />
+                </label>
+              </div>
+              <button
+                type="button"
+                disabled={loading}
+                onClick={simulateReply}
+                className="mt-3 rounded-xl px-4 py-2.5 text-sm font-bold text-white"
+                style={{ background: "#25D366" }}
+              >
+                Simulate inbound message
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="divide-y divide-slate-100">
+            {inbound.map((msg) => (
+              <div key={msg.id} className="flex flex-wrap items-start justify-between gap-3 p-4">
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <div className="font-bold">{msg.lead?.name || msg.fromPhone}</div>
+                    {msg.lead?.type && (
+                      <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-600">
+                        {msg.lead.type}
+                      </span>
+                    )}
+                  </div>
+                  <div className="mt-2 rounded-xl bg-slate-50 p-3 text-sm text-slate-800">
+                    <span className="text-[10px] font-bold uppercase text-slate-400">Inbound</span>
+                    <p className="mt-0.5">{msg.text}</p>
+                  </div>
+                  {msg.aiReply && (
+                    <div className="mt-2 rounded-xl border border-emerald-100 bg-emerald-50 p-3 text-sm text-emerald-900">
+                      <span className="flex items-center gap-1 text-[10px] font-bold uppercase text-emerald-700">
+                        <Bot className="h-3 w-3" />
+                        AI reply {platform?.mode === "DEMO" ? "(demo — not sent to WhatsApp)" : ""}
+                      </span>
+                      <p className="mt-0.5">{msg.aiReply}</p>
+                    </div>
+                  )}
+                  <div className="mt-2 text-[10px] text-slate-400">{new Date(msg.createdAt).toLocaleString()}</div>
+                </div>
+                <div className="flex flex-col gap-2">
+                  <span
+                    className={`rounded-full px-2.5 py-1 text-center text-[10px] font-bold ${
+                      msg.handledBy === "AGENT" || msg.requiresAgent
+                        ? "bg-red-100 text-red-700"
+                        : msg.handledBy === "AI"
+                          ? "bg-emerald-100 text-emerald-800"
+                          : "bg-slate-100 text-slate-600"
+                    }`}
+                  >
+                    {msg.handledBy}
+                  </span>
+                  {(msg.requiresAgent || msg.handledBy === "AGENT") && msg.handledBy !== "AGENT" && (
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        const res = await fetch("/api/whatsapp/inbound", {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({ action: "assign_agent", messageId: msg.id })
+                        });
+                        if (res.ok) {
+                          toast.success("Agent assigned to conversation.");
+                          onRefresh();
+                        } else {
+                          toast.error("Could not assign agent.");
+                        }
+                      }}
+                      className="rounded-lg px-3 py-1.5 text-xs font-bold text-white"
+                      style={{ background: settings.primary }}
+                    >
+                      Assign agent
+                    </button>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
         )}
       </div>
+
+      {inbound.length > 0 && (
+        <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+          <p className="mb-2 text-xs font-bold uppercase text-slate-500">Add another test message</p>
+          <div className="flex flex-wrap gap-2">
+            <select
+              value={fromPhone}
+              onChange={(e) => setFromPhone(e.target.value)}
+              className="min-w-[180px] flex-1 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
+            >
+              {leadsWithPhone.map((l) => (
+                <option key={l.id} value={l.phone!}>
+                  {l.name || l.phone}
+                </option>
+              ))}
+            </select>
+            <input
+              value={simulateText}
+              onChange={(e) => setSimulateText(e.target.value)}
+              placeholder="Simulate lead reply…"
+              className="min-w-[200px] flex-[2] rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
+            />
+            <button
+              type="button"
+              disabled={loading}
+              onClick={simulateReply}
+              className="rounded-xl px-4 py-2 text-sm font-bold text-white"
+              style={{ background: "#25D366" }}
+            >
+              Send test
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -1353,40 +1638,180 @@ function Metric({ label, value }: { label: string; value: number }) {
 function SettingsPanel({
   platform,
   copied,
-  onCopy
+  onCopy,
+  onRefresh
 }: {
   platform: PlatformStatus;
   copied: boolean;
   onCopy: () => void;
+  onRefresh: () => void;
 }) {
+  const toast = useToast();
+  const [testing, setTesting] = useState(false);
+  const [liveTesting, setLiveTesting] = useState(false);
+  const [setup, setSetup] = useState<{
+    checklist: Array<{ id: string; label: string; done: boolean; hint?: string }>;
+    testNumberHint: string;
+  } | null>(null);
+  const testPhone = process.env.NEXT_PUBLIC_WHATSAPP_NUMBER || "+923412879311";
+  const appUrl = typeof window !== "undefined" ? window.location.origin : platform.webhookUrl.replace(/\/api\/whatsapp\/webhook$/, "");
+
+  useEffect(() => {
+    fetch("/api/whatsapp/setup")
+      .then((r) => r.json())
+      .then((d) => d.setup && setSetup(d.setup))
+      .catch(() => null);
+  }, []);
+
+  async function testLiveSend() {
+    setLiveTesting(true);
+    try {
+      const res = await fetch("/api/whatsapp/test-send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          phone: testPhone,
+          message: "PropertyConnect AI — your WhatsApp API is working.",
+          deliveryMethod: "template",
+          templateName: "hello_world",
+          templateLanguage: "en_US"
+        })
+      });
+      const data = await res.json();
+      if (!data.ok) throw new Error(data.error || "Send failed");
+      toast.success(`Message sent to ${testPhone}. Check WhatsApp on your phone.`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Live test failed");
+    } finally {
+      setLiveTesting(false);
+    }
+  }
+
+  async function testWebhookSimulate() {
+    setTesting(true);
+    try {
+      const res = await fetch("/api/whatsapp/webhook/simulate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          text: "INTERESTED — please share details for the DHA apartment.",
+          fromPhone: "923009999999"
+        })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Webhook test failed");
+      toast.success("Webhook test OK — check Conversations tab.");
+      onRefresh();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Test failed");
+    } finally {
+      setTesting(false);
+    }
+  }
+
   return (
-    <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-      <PanelHeader title="Settings" subtitle="WhatsApp Cloud API & webhook configuration" />
-      <ul className="mt-4 space-y-3 text-sm">
-        <li className="flex justify-between rounded-xl bg-slate-50 p-3">
-          <span>API mode</span>
-          <strong>{platform.configured ? "LIVE" : "DEMO"}</strong>
-        </li>
-        <li className="rounded-xl bg-slate-50 p-3">
-          <div className="text-xs font-semibold text-slate-500">Webhook URL</div>
-          <div className="mt-1 flex items-center gap-2">
-            <code className="flex-1 break-all text-xs">{platform.webhookUrl}</code>
-            <button type="button" onClick={onCopy}>
-              {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
-            </button>
-          </div>
-        </li>
-        <li className="flex justify-between rounded-xl bg-slate-50 p-3">
-          <span>Verify token</span>
-          <strong>{platform.verifyTokenSet ? "Configured" : "Missing WHATSAPP_VERIFY_TOKEN"}</strong>
-        </li>
-      </ul>
-      <p className="mt-4 text-xs leading-relaxed text-slate-500">
-        Set <code className="rounded bg-slate-100 px-1">WHATSAPP_ACCESS_TOKEN</code>,{" "}
-        <code className="rounded bg-slate-100 px-1">WHATSAPP_PHONE_NUMBER_ID</code>, and{" "}
-        <code className="rounded bg-slate-100 px-1">WHATSAPP_VERIFY_TOKEN</code> in your environment for live sends.
-        Each broadcast sends one private message per opted-in contact — never a WhatsApp group.
-      </p>
+    <div className="space-y-4">
+      <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+        <PanelHeader title="Settings" subtitle="WhatsApp Cloud API & webhook — connects campaigns to Conversations" />
+        <ul className="mt-4 space-y-3 text-sm">
+          <li className="flex justify-between rounded-xl bg-slate-50 p-3">
+            <span>API mode</span>
+            <strong className={platform.configured ? "text-emerald-700" : "text-violet-700"}>
+              {platform.configured ? "LIVE" : "DEMO"}
+            </strong>
+          </li>
+          <li className="flex justify-between rounded-xl bg-slate-50 p-3">
+            <span>Service</span>
+            <strong>{platform.providerLabel || "Not configured"}</strong>
+          </li>
+          <li className="rounded-xl bg-slate-50 p-3">
+            <div className="text-xs font-semibold text-slate-500">Webhook URL (paste in Meta)</div>
+            <div className="mt-1 flex items-center gap-2">
+              <code className="flex-1 break-all text-xs">{platform.webhookUrl}</code>
+              <button type="button" onClick={onCopy} title="Copy URL">
+                {copied ? <Check className="h-4 w-4 text-emerald-600" /> : <Copy className="h-4 w-4" />}
+              </button>
+            </div>
+          </li>
+          <li className="flex justify-between rounded-xl bg-slate-50 p-3">
+            <span>Verify token</span>
+            <strong>{platform.verifyTokenSet ? "Configured" : "Set WHATSAPP_VERIFY_TOKEN in .env"}</strong>
+          </li>
+        </ul>
+
+        {setup?.checklist && (
+          <ul className="mt-4 space-y-2">
+            {setup.checklist.map((item) => (
+              <li
+                key={item.id}
+                className={`rounded-xl p-3 text-sm ${item.done ? "bg-emerald-50 text-emerald-900" : "bg-amber-50 text-amber-900"}`}
+              >
+                <div className="font-semibold">{item.done ? "✓" : "○"} {item.label}</div>
+                {item.hint && !item.done && <div className="mt-1 text-xs opacity-80">{item.hint}</div>}
+              </li>
+            ))}
+          </ul>
+        )}
+
+        <div className="mt-5 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+          <p className="mb-3 text-xs font-bold uppercase text-slate-500">Meta setup checklist</p>
+          <ol className="list-decimal space-y-2 pl-5 text-sm text-slate-700">
+            <li>
+              <a
+                href="https://developers.facebook.com/apps/"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="font-semibold text-blue-600 underline"
+              >
+                Meta Developer Console
+              </a>{" "}
+              → your app → WhatsApp → Configuration
+            </li>
+            <li>
+              Callback URL: <code className="text-xs">{platform.webhookUrl}</code>
+            </li>
+            <li>Verify token: same value as <code>WHATSAPP_VERIFY_TOKEN</code> in `.env`</li>
+            <li>Subscribe to: <strong>messages</strong> (and message status if available)</li>
+            <li>
+              For local dev use ngrok: <code className="text-xs">{appUrl}</code> → public URL +{" "}
+              <code>/api/whatsapp/webhook</code>
+            </li>
+            <li>
+              <strong>Easier:</strong>{" "}
+              <a href="https://green-api.com" target="_blank" rel="noopener noreferrer" className="text-blue-600 underline">
+                Green API
+              </a>{" "}
+              → set <code>GREEN_API_INSTANCE_ID</code> + <code>GREEN_API_API_TOKEN</code> in `.env` → scan QR
+            </li>
+          </ol>
+        </div>
+
+        <div className="mt-4 flex flex-wrap gap-2">
+          <button
+            type="button"
+            disabled={liveTesting || !platform.configured}
+            onClick={testLiveSend}
+            className="rounded-xl bg-[#25D366] px-4 py-2.5 text-sm font-bold text-white hover:opacity-90 disabled:opacity-50"
+          >
+            {liveTesting ? "Sending…" : `Send real test to ${testPhone}`}
+          </button>
+          <button
+            type="button"
+            disabled={testing}
+            onClick={testWebhookSimulate}
+            className="rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-bold text-white hover:bg-emerald-700"
+          >
+            {testing ? "Testing…" : "Test webhook (simulate inbound)"}
+          </button>
+        </div>
+
+        <p className="mt-4 text-xs leading-relaxed text-slate-500">
+          <strong>DEMO:</strong> Use Conversations → Load demo / Simulate — no Meta account required.{" "}
+          <strong>LIVE:</strong> Set <code className="rounded bg-slate-100 px-1">WHATSAPP_ACCESS_TOKEN</code>,{" "}
+          <code className="rounded bg-slate-100 px-1">WHATSAPP_PHONE_NUMBER_ID</code>, and webhook fields in `.env`.
+          Real replies appear here automatically; AI sends WhatsApp text back when LIVE.
+        </p>
+      </div>
     </div>
   );
 }

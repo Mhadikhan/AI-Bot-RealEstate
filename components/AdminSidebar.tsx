@@ -11,8 +11,10 @@ import {
   HelpCircle,
   LayoutDashboard,
   Megaphone,
+  MessageCircle,
   Palette,
   Share2,
+  Smartphone,
   Users
 } from "lucide-react";
 
@@ -28,6 +30,8 @@ export type AdminTabId =
   | "social"
   | "broadcast"
   | "whatsapp-analytics"
+  | "whatsapp-settings"
+  | "whatsapp-inbox"
   | "bot";
 
 type NavItem = {
@@ -52,6 +56,8 @@ const NAV_GROUPS: { title: string; items: NavItem[] }[] = [
     title: "Marketing",
     items: [
       { id: "broadcast", label: "WhatsApp Campaigns", icon: Megaphone },
+      { id: "whatsapp-inbox", label: "WhatsApp Inbox", icon: MessageCircle, external: true },
+      { id: "whatsapp-settings", label: "WhatsApp Settings", icon: Smartphone, external: true },
       { id: "whatsapp-analytics", label: "WhatsApp Analytics", icon: BarChart3, external: true },
       { id: "social", label: "Social Media", icon: Share2 }
     ]
@@ -117,7 +123,9 @@ export default function AdminSidebar({
                         type="button"
                         onClick={() => {
                           if (item.external) {
-                            window.location.href = "/admin/whatsapp";
+                            if (item.id === "whatsapp-analytics") window.location.href = "/admin/whatsapp";
+                            else if (item.id === "whatsapp-settings") window.location.href = "/admin/settings/whatsapp";
+                            else if (item.id === "whatsapp-inbox") window.location.href = "/admin/whatsapp/inbox";
                             return;
                           }
                           onNavigate(item.id);

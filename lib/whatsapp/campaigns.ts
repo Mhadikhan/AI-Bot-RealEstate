@@ -7,12 +7,16 @@ import {
 } from "../broadcast";
 import type { CrmAudienceFilters } from "../audience-filters";
 import { queryLeadsForCrmAudience } from "../audience-filters";
-import { personalizeBroadcastMessage, sendWhatsAppText } from "../whatsapp-cloud";
+import { personalizeBroadcastMessage, type WhatsAppMessageKind } from "../whatsapp-cloud";
 import { getCampaignMode } from "./config";
+import { buildManualSendLinks, parseCampaignDelivery } from "./delivery";
+import { getActiveProvider, sendViaActiveProvider } from "./providers";
 
 export type CreateCampaignInput = {
   title: string;
   message: string;
+  messageType?: WhatsAppMessageKind;
+  mediaUrl?: string | null;
   category?: CampaignCategory;
   audience: BroadcastAudience;
   crmFilters?: CrmAudienceFilters;
@@ -153,8 +157,9 @@ export async function executeCampaignSend(campaignId: string) {
   if (!campaign) throw new Error("Campaign not found");
   if (campaign.recipients.length === 0) throw new Error("No recipients on this campaign.");
 
-  const mode = campaign.mode;
+  const mode = getCampaignMode();
   const isLive = mode === "LIVE";
+  const provider = getActiveProvider();
 
   await prisma.broadcast.update({
     where: { id: campaignId },
@@ -164,9 +169,15 @@ export async function executeCampaignSend(campaignId: string) {
   let sentCount = 0;
   let failedCount = 0;
   let simulatedCount = 0;
+  const errors: Array<{ phone: string; error: string }> = [];
+
+  const messageType = (campaign.messageType || "TEXT") as WhatsAppMessageKind;
+  const mediaUrl = campaign.mediaUrl;
+  const delivery = parseCampaignDelivery(campaign.audienceFilters);
 
   for (const recipient of campaign.recipients) {
-    const body = recipient.personalizedMessage || personalizeBroadcastMessage(campaign.message, recipient.name);
+    const body =
+      recipient.personalizedMessage || personalizeBroadcastMessage(campaign.message, recipient.name);
 
     if (!isLive) {
       await prisma.broadcastRecipient.update({
@@ -183,14 +194,26 @@ export async function executeCampaignSend(campaignId: string) {
           recipientId: recipient.id,
           leadId: recipient.leadId,
           eventType: "simulated",
-          payload: { note: "Demo mode — not sent to Meta API" }
+          payload: {
+            note: "Demo mode — not sent to Meta API. Configure WHATSAPP_ACCESS_TOKEN for real delivery.",
+            messageType,
+            mediaUrl: mediaUrl || null,
+            manualUrl: buildManualSendLinks([recipient.phone], body)[0]?.url
+          }
         }
       });
       simulatedCount += 1;
       continue;
     }
 
-    const result = await sendWhatsAppText(recipient.phone, body);
+    const result = await sendViaActiveProvider({
+      phone: recipient.phone,
+      name: recipient.name,
+      messageType,
+      text: body,
+      mediaUrl,
+      delivery
+    });
 
     if (result.ok && result.messageId) {
       await prisma.broadcastRecipient.update({
@@ -209,7 +232,11 @@ export async function executeCampaignSend(campaignId: string) {
           leadId: recipient.leadId,
           eventType: "submitted",
           waMessageId: result.messageId,
-          payload: { messageId: result.messageId }
+          payload: {
+            messageId: result.messageId,
+            deliveryMethod: delivery.deliveryMethod,
+            templateName: delivery.templateName
+          }
         }
       });
       sentCount += 1;
@@ -221,10 +248,24 @@ export async function executeCampaignSend(campaignId: string) {
           error: result.error || "Send failed"
         }
       });
+      await prisma.whatsAppWebhookEvent.create({
+        data: {
+          broadcastId: campaignId,
+          recipientId: recipient.id,
+          leadId: recipient.leadId,
+          eventType: "failed",
+          payload: { error: result.error, deliveryMethod: delivery.deliveryMethod }
+        }
+      });
       failedCount += 1;
+      errors.push({ phone: recipient.phone, error: result.error || "Send failed" });
     }
 
     await new Promise((resolve) => setTimeout(resolve, 320));
+  }
+
+  if (campaign.mode !== mode) {
+    await prisma.broadcast.update({ where: { id: campaignId }, data: { mode } });
   }
 
   const finalStatus =
@@ -257,7 +298,7 @@ export async function executeCampaignSend(campaignId: string) {
 
   return {
     campaign: updated,
-    summary: { sentCount, failedCount, simulatedCount, mode }
+    summary: { sentCount, failedCount, simulatedCount, mode, provider, errors }
   };
 }
 

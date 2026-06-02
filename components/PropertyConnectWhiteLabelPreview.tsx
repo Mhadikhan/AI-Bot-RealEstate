@@ -34,6 +34,7 @@ import { defaultBrandSettings, fetchBrandSettings, loadBrandSettings, persistBra
 import { defaultSocialLinks, loadSocialLinks, saveSocialLinks, type SocialLinks, whatsAppUrl } from "../lib/social";
 import { PropertyShareButtons, SocialBar } from "./SocialLinks";
 import WhatsAppCampaigns from "./WhatsAppCampaigns";
+import PropertyMediaPanel from "./PropertyMediaPanel";
 import AdminSidebar, { AdminPageHeader, ADMIN_QUICK_ACTIONS } from "./AdminSidebar";
 import PublicSiteHeader from "./PublicSiteHeader";
 import {
@@ -453,6 +454,8 @@ export default function PropertyConnectWhiteLabelPreview({ variant = "public" }:
   const [propertySaving, setPropertySaving] = useState(false);
   const [propertyError, setPropertyError] = useState("");
   const [imageUploading, setImageUploading] = useState(false);
+  const [mediaPropertyId, setMediaPropertyId] = useState<string | null>(null);
+  const [mediaPropertyTitle, setMediaPropertyTitle] = useState("");
   const [logoUploading, setLogoUploading] = useState(false);
   const [brandSaved, setBrandSaved] = useState(false);
   const [brandError, setBrandError] = useState("");
@@ -1203,9 +1206,40 @@ export default function PropertyConnectWhiteLabelPreview({ variant = "public" }:
                   </div>
                   <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
                     {listings.map((item) => (
-                      <ListingCard key={item.id} item={item} settings={settings} />
+                      <div key={item.id} className="space-y-2">
+                        <ListingCard item={item} settings={settings} />
+                        {typeof item.id === "string" && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setMediaPropertyId(String(item.id));
+                              setMediaPropertyTitle(item.title);
+                            }}
+                            className="w-full rounded-xl border border-slate-200 bg-white py-2 text-xs font-bold text-slate-600 hover:bg-slate-50"
+                          >
+                            WhatsApp media (images, video, PDF)
+                          </button>
+                        )}
+                      </div>
                     ))}
                   </div>
+
+                  {mediaPropertyId && (
+                    <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-900/50 p-4">
+                      <div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl">
+                        <div className="mb-4 flex items-center justify-between">
+                          <div>
+                            <h3 className="text-lg font-extrabold">Property media</h3>
+                            <p className="text-sm text-slate-500">{mediaPropertyTitle}</p>
+                          </div>
+                          <button type="button" onClick={() => setMediaPropertyId(null)}>
+                            <X className="h-5 w-5" />
+                          </button>
+                        </div>
+                        <PropertyMediaPanel propertyId={mediaPropertyId} primary={settings.primary} />
+                      </div>
+                    </div>
+                  )}
 
                   {showAddProperty && (
                     <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-900/50 p-4">

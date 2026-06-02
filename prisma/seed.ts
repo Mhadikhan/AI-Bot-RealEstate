@@ -153,6 +153,9 @@ async function main() {
     where: { phone: { not: null } },
     data: { whatsappOptIn: true }
   });
+
+  const { seedDemoInboundConversations } = await import("../lib/whatsapp/demo-inbound");
+  await seedDemoInboundConversations(false);
 }
 
 main()

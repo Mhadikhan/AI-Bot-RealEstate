@@ -1,6 +1,6 @@
 import { prisma } from "../prisma";
 import { processChatMessage } from "../chat-engine";
-import { sendWhatsAppText } from "../whatsapp-cloud";
+import { sendWhatsAppTextMessage } from "./whatsapp-message.service";
 import { findLeadByPhone } from "./webhooks";
 import { isWhatsAppLiveMode } from "./config";
 
@@ -67,7 +67,7 @@ export async function handleInboundWhatsAppMessage(input: {
     }
 
     if (isWhatsAppLiveMode() && lead?.phone) {
-      await sendWhatsAppText(
+      await sendWhatsAppTextMessage(
         lead.phone,
         "Thank you. A property consultant from PropertyConnect AI will contact you shortly on WhatsApp."
       );
@@ -99,7 +99,7 @@ export async function handleInboundWhatsAppMessage(input: {
   }
 
   if (isWhatsAppLiveMode()) {
-    await sendWhatsAppText(input.fromPhone, aiResult.message);
+    await sendWhatsAppTextMessage(input.fromPhone, aiResult.message);
   }
 
   return inbound;

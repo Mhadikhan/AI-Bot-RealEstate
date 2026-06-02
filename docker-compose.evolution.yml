@@ -1,0 +1,56 @@
+# Evolution API stack for local PropertyConnect AI development.
+# Start: docker compose -f docker-compose.evolution.yml up -d
+# Logs:  docker compose -f docker-compose.evolution.yml logs -f evolution-api
+
+services:
+  evolution-db:
+    image: postgres:16-alpine
+    container_name: propertyconnect_evolution_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: evolution
+      POSTGRES_USER: evolution
+      POSTGRES_PASSWORD: change-this-password
+    volumes:
+      - evolution_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U evolution -d evolution"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  redis:
+    image: redis:7-alpine
+    container_name: propertyconnect_evolution_redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    volumes:
+      - evolution_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  evolution-api:
+    image: evoapicloud/evolution-api:v2.3.7
+    container_name: propertyconnect_evolution_api
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    env_file:
+      - .env.evolution
+    depends_on:
+      evolution-db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - evolution_instances:/evolution/instances
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+volumes:
+  evolution_instances:
+  evolution_postgres_data:
+  evolution_redis_data:

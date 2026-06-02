@@ -82,6 +82,12 @@ enum BroadcastRecipientStatus {
   PENDING
 }
 
+enum WhatsAppMessageType {
+  TEXT
+  IMAGE
+  VIDEO
+}
+
 enum CampaignCategory {
   NEW_PROPERTY_ALERT
   RENTAL_LISTING_UPDATE
@@ -141,8 +147,14 @@ model Lead {
   status               LeadStatus      @default(NEW)
   source               String          @default("Website Chatbot")
   requiresHumanFollowUp Boolean         @default(false)
-  whatsappOptIn        Boolean         @default(true)
-  whatsappOptInAt      DateTime?
+  whatsappNumber             String?
+  whatsappOptIn              Boolean         @default(false)
+  whatsappOptInAt          DateTime?
+  whatsappOptInSource      String?
+  whatsappOptInText        String?
+  whatsappUnsubscribed     Boolean         @default(false)
+  whatsappUnsubscribedAt   DateTime?
+  whatsappUnsubscribeReason String?
   tags                 String[]        @default([])
   propertyCategoryPreference PropertyCategory?
   agentId              String?
@@ -151,6 +163,7 @@ model Lead {
   bookings             ViewingBooking[]
   broadcastRecipients  BroadcastRecipient[]
   inboundMessages    WhatsAppInboundMessage[]
+  waConversations    WhatsAppConversation[]
   followUpEnrollments FollowUpEnrollment[]
   createdAt            DateTime        @default(now())
   updatedAt            DateTime        @updatedAt
@@ -208,6 +221,7 @@ model Property {
   agentId        String?
   agent          Agent?           @relation(fields: [agentId], references: [id])
   bookings       ViewingBooking[]
+  media          PropertyMedia[]
   createdAt      DateTime         @default(now())
   updatedAt      DateTime         @updatedAt
 
@@ -261,6 +275,8 @@ model Broadcast {
   id               String           @id @default(cuid())
   title            String
   message          String
+  messageType      WhatsAppMessageType @default(TEXT)
+  mediaUrl         String?
   category         CampaignCategory @default(CUSTOM)
   status           BroadcastStatus  @default(DRAFT)
   mode             CampaignMode     @default(DEMO)
@@ -317,20 +333,121 @@ model BroadcastRecipient {
 }
 
 model WhatsAppWebhookEvent {
-  id          String   @id @default(cuid())
-  broadcastId String?
-  broadcast   Broadcast? @relation(fields: [broadcastId], references: [id], onDelete: SetNull)
-  recipientId String?
-  recipient   BroadcastRecipient? @relation(fields: [recipientId], references: [id], onDelete: SetNull)
-  leadId      String?
-  eventType   String
-  waMessageId String?
-  payload     Json
-  createdAt   DateTime @default(now())
+  id             String   @id @default(cuid())
+  broadcastId    String?
+  broadcast      Broadcast? @relation(fields: [broadcastId], references: [id], onDelete: SetNull)
+  recipientId    String?
+  recipient      BroadcastRecipient? @relation(fields: [recipientId], references: [id], onDelete: SetNull)
+  leadId         String?
+  eventType      String
+  waMessageId    String?
+  idempotencyKey String?  @unique
+  payload        Json
+  createdAt      DateTime @default(now())
 
   @@index([eventType])
   @@index([waMessageId])
   @@index([createdAt])
+}
+
+enum PropertyMediaType {
+  IMAGE
+  VIDEO
+  BROCHURE
+  FLOOR_PLAN
+  DOCUMENT
+}
+
+enum WhatsAppMessageDirection {
+  INBOUND
+  OUTBOUND
+}
+
+enum WhatsAppMessageStatus {
+  QUEUED
+  SENT
+  DELIVERED
+  READ
+  REPLIED
+  FAILED
+  SIMULATED
+}
+
+enum WaConversationMessageType {
+  TEXT
+  IMAGE
+  VIDEO
+  DOCUMENT
+  AUDIO
+  BUTTON_RESPONSE
+  SYSTEM
+}
+
+model PropertyMedia {
+  id           String            @id @default(cuid())
+  propertyId   String
+  property     Property          @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  type         PropertyMediaType
+  fileName     String
+  mimeType     String
+  storageUrl   String
+  thumbnailUrl String?
+  isPrimary    Boolean           @default(false)
+  displayOrder Int               @default(0)
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
+
+  @@index([propertyId])
+  @@index([type])
+}
+
+model WhatsAppInstance {
+  id               String   @id @default(cuid())
+  tenantId         String   @default("default")
+  provider         String
+  instanceName     String
+  integration      String
+  connectionStatus String   @default("NOT_CONNECTED")
+  connectedPhone   String?
+  lastCheckedAt    DateTime?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@unique([tenantId, instanceName])
+}
+
+model WhatsAppConversation {
+  id              String            @id @default(cuid())
+  tenantId        String            @default("default")
+  leadId          String?
+  lead            Lead?             @relation(fields: [leadId], references: [id])
+  phone           String
+  assignedAgentId String?
+  status          String            @default("OPEN")
+  lastMessageAt   DateTime?
+  messages        WhatsAppMessage[]
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  @@index([tenantId, phone])
+}
+
+model WhatsAppMessage {
+  id                String                   @id @default(cuid())
+  conversationId    String
+  conversation      WhatsAppConversation     @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  direction         WhatsAppMessageDirection
+  type              WaConversationMessageType
+  status            WhatsAppMessageStatus
+  text              String?
+  mediaUrl          String?
+  externalMessageId String?
+  errorMessage      String?
+  createdAt         DateTime                 @default(now())
+  updatedAt         DateTime                 @updatedAt
+
+  @@index([conversationId, createdAt])
+  @@index([externalMessageId])
 }
 
 model WhatsAppInboundMessage {

@@ -2,6 +2,7 @@ node_modules
 .next
 .env
 .env.local
+.env.evolution
 .agents/
 .neon
 skills-lock.json
@@ -10,4 +11,7 @@ public/uploads/properties/*
 !public/uploads/properties/.gitkeep
 public/uploads/logos/*
 !public/uploads/logos/.gitkeep
+public/uploads/whatsapp/*
+!public/uploads/whatsapp/.gitkeep
 data/brand-settings.json
+tsconfig.tsbuildinfo
