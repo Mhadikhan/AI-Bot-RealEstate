@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { createCampaign, listCampaigns } from "../../../lib/whatsapp/campaigns";
+
+export const maxDuration = 300;
 import { getWhatsAppStatus } from "../../../lib/whatsapp/config";
 import { CAMPAIGN_CATEGORIES, type BroadcastAudience } from "../../../lib/broadcast";
 import { crmFiltersSchema } from "../../../lib/audience-filters-schema";

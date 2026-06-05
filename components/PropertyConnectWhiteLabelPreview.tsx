@@ -468,6 +468,9 @@ export default function PropertyConnectWhiteLabelPreview({ variant = "public" }:
   const [purposeFilter, setPurposeFilter] = useState<"All" | "Sale" | "Rent">("All");
   const [categoryFilter, setCategoryFilter] = useState<"All" | "Ready" | "Off-plan">("All");
   const [cityFilter, setCityFilter] = useState("");
+  const [leadAreaFilter, setLeadAreaFilter] = useState("Karachi");
+  const [collectedPhones, setCollectedPhones] = useState<string[] | null>(null);
+  const [phonesCopied, setPhonesCopied] = useState(false);
 
   useEffect(() => {
     fetchBrandSettings().then(setSettings).catch(() => setSettings(loadBrandSettings()));
@@ -1120,36 +1123,159 @@ export default function PropertyConnectWhiteLabelPreview({ variant = "public" }:
                     title="Leads & CRM"
                     description="Buyers, tenants, investors, and callbacks captured by your AI chatbot and website."
                   >
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const rows = [
-                          ["Name", "Type", "Area", "Score", "Temperature", "Status"],
-                          ...leads.map((lead) => [
-                            lead.name || "Anonymous",
-                            lead.type,
-                            lead.preferredArea || "",
-                            String(lead.score),
-                            lead.temperature,
-                            lead.status
-                          ])
-                        ];
-                        const csv = rows.map((row) => row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(",")).join("\n");
-                        const blob = new Blob([csv], { type: "text/csv" });
-                        const url = URL.createObjectURL(blob);
-                        const link = document.createElement("a");
-                        link.href = url;
-                        link.download = "propertyconnect-leads.csv";
-                        link.click();
-                        URL.revokeObjectURL(url);
-                      }}
-                      className="flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-bold text-white"
-                      style={{ background: settings.primary }}
-                    >
-                      <Download className="h-4 w-4" />
-                      Export CSV
-                    </button>
+                    <div className="flex flex-wrap gap-2">
+                      {/* Collect Phone Numbers */}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const filter = leadAreaFilter.trim().toLowerCase();
+                          const filtered = leads.filter((l) => {
+                            if (!l.phone?.trim()) return false;
+                            if (!filter) return true;
+                            return (l.preferredArea || "").toLowerCase().includes(filter) ||
+                                   (l.name || "").toLowerCase().includes(filter);
+                          });
+                          const phones = [...new Set(
+                            filtered.map((l) => l.phone!.replace(/\D/g, "")).filter((p) => p.length >= 10)
+                          )];
+                          setCollectedPhones(phones);
+                          setPhonesCopied(false);
+                        }}
+                        className="flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-bold text-white hover:bg-emerald-700"
+                      >
+                        <Phone className="h-4 w-4" />
+                        Collect Phone Numbers
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const rows = [
+                            ["Name", "Type", "Area", "Score", "Temperature", "Status"],
+                            ...leads.map((lead) => [
+                              lead.name || "Anonymous",
+                              lead.type,
+                              lead.preferredArea || "",
+                              String(lead.score),
+                              lead.temperature,
+                              lead.status
+                            ])
+                          ];
+                          const csv = rows.map((row) => row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(",")).join("\n");
+                          const blob = new Blob([csv], { type: "text/csv" });
+                          const url = URL.createObjectURL(blob);
+                          const link = document.createElement("a");
+                          link.href = url;
+                          link.download = "realestateworkeasy-leads.csv";
+                          link.click();
+                          URL.revokeObjectURL(url);
+                        }}
+                        className="flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-bold text-white"
+                        style={{ background: settings.primary }}
+                      >
+                        <Download className="h-4 w-4" />
+                        Export CSV
+                      </button>
+                    </div>
                   </AdminPageHeader>
+
+                  {/* Collect Phone Numbers Panel */}
+                  <div className="mb-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                    <div className="flex flex-wrap items-center gap-3">
+                      <div className="flex items-center gap-2">
+                        <Phone className="h-4 w-4 text-emerald-600" />
+                        <span className="text-sm font-bold text-slate-700">Collect phones by area</span>
+                      </div>
+                      <input
+                        value={leadAreaFilter}
+                        onChange={(e) => setLeadAreaFilter(e.target.value)}
+                        placeholder="e.g. Karachi, Titanium, North Town…"
+                        className="flex-1 rounded-xl border border-slate-200 px-3 py-2 text-sm min-w-[180px]"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const filter = leadAreaFilter.trim().toLowerCase();
+                          const filtered = leads.filter((l) => {
+                            if (!l.phone?.trim()) return false;
+                            if (!filter) return true;
+                            return (l.preferredArea || "").toLowerCase().includes(filter) ||
+                                   (l.name || "").toLowerCase().includes(filter);
+                          });
+                          const phones = [...new Set(
+                            filtered.map((l) => l.phone!.replace(/\D/g, "")).filter((p) => p.length >= 10)
+                          )];
+                          setCollectedPhones(phones);
+                          setPhonesCopied(false);
+                        }}
+                        className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-bold text-white hover:bg-emerald-700"
+                      >
+                        Collect
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const all = leads.filter((l) => l.phone?.trim());
+                          const phones = [...new Set(
+                            all.map((l) => l.phone!.replace(/\D/g, "")).filter((p) => p.length >= 10)
+                          )];
+                          setCollectedPhones(phones);
+                          setLeadAreaFilter("");
+                          setPhonesCopied(false);
+                        }}
+                        className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-50"
+                      >
+                        All leads
+                      </button>
+                    </div>
+
+                    {collectedPhones !== null && (
+                      <div className="mt-3">
+                        <div className="mb-2 flex items-center justify-between">
+                          <span className="text-xs font-semibold text-slate-500">
+                            {collectedPhones.length} phone number{collectedPhones.length !== 1 ? "s" : ""} found
+                            {leadAreaFilter ? ` matching "${leadAreaFilter}"` : " (all leads)"}
+                          </span>
+                          <div className="flex gap-2">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                navigator.clipboard.writeText(collectedPhones.join("\n"));
+                                setPhonesCopied(true);
+                                setTimeout(() => setPhonesCopied(false), 2000);
+                              }}
+                              className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-emerald-700"
+                            >
+                              {phonesCopied ? "Copied!" : "Copy all"}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setCollectedPhones(null)}
+                              className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-bold text-slate-600"
+                            >
+                              Clear
+                            </button>
+                          </div>
+                        </div>
+                        {collectedPhones.length > 0 ? (
+                          <textarea
+                            readOnly
+                            value={collectedPhones.join("\n")}
+                            rows={Math.min(collectedPhones.length + 1, 8)}
+                            className="w-full rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 font-mono text-xs text-slate-700"
+                          />
+                        ) : (
+                          <p className="rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                            No leads with phone numbers match{leadAreaFilter ? ` "${leadAreaFilter}"` : ""}. Try a different area or click "All leads".
+                          </p>
+                        )}
+                        {collectedPhones.length > 0 && (
+                          <p className="mt-1 text-xs text-slate-500">
+                            Copy → go to <strong>WhatsApp Campaigns → Phone List Send</strong> → paste → send broadcast
+                          </p>
+                        )}
+                      </div>
+                    )}
+                  </div>
                   <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
                     <table className="w-full text-left text-sm">
                       <thead className="bg-slate-50 text-xs uppercase text-slate-500">

@@ -157,6 +157,17 @@ export async function executeCampaignSend(campaignId: string) {
   if (!campaign) throw new Error("Campaign not found");
   if (campaign.recipients.length === 0) throw new Error("No recipients on this campaign.");
 
+  // Concurrency guard: if already SENDING (another request started it), abort to prevent duplicates.
+  // Only re-enter from DRAFT / SCHEDULED / FAILED / PARTIAL states.
+  if (campaign.status === "SENDING") {
+    const sentAlready = campaign.recipients.filter((r) =>
+      ["SUBMITTED", "SIMULATED", "DELIVERED", "READ"].includes(r.status)
+    ).length;
+    if (sentAlready > 0) {
+      throw new Error("Campaign is already sending. Wait for it to finish before retrying.");
+    }
+  }
+
   const mode = getCampaignMode();
   const isLive = mode === "LIVE";
   const provider = getActiveProvider();
@@ -175,93 +186,136 @@ export async function executeCampaignSend(campaignId: string) {
   const mediaUrl = campaign.mediaUrl;
   const delivery = parseCampaignDelivery(campaign.audienceFilters);
 
-  for (const recipient of campaign.recipients) {
-    const body =
-      recipient.personalizedMessage || personalizeBroadcastMessage(campaign.message, recipient.name);
+  try {
+    for (const recipient of campaign.recipients) {
+      // Skip recipients that already have a terminal status (idempotent re-send)
+      if (["SUBMITTED", "SIMULATED", "DELIVERED", "READ"].includes(recipient.status)) {
+        if (recipient.status === "SIMULATED") simulatedCount += 1;
+        else sentCount += 1;
+        continue;
+      }
 
-    if (!isLive) {
-      await prisma.broadcastRecipient.update({
-        where: { id: recipient.id },
-        data: {
-          status: "SIMULATED",
-          sentAt: new Date(),
-          error: null
-        }
-      });
-      await prisma.whatsAppWebhookEvent.create({
-        data: {
-          broadcastId: campaignId,
-          recipientId: recipient.id,
-          leadId: recipient.leadId,
-          eventType: "simulated",
-          payload: {
-            note: "Demo mode — not sent to Meta API. Configure WHATSAPP_ACCESS_TOKEN for real delivery.",
-            messageType,
-            mediaUrl: mediaUrl || null,
-            manualUrl: buildManualSendLinks([recipient.phone], body)[0]?.url
+      const body =
+        recipient.personalizedMessage || personalizeBroadcastMessage(campaign.message, recipient.name);
+
+      if (!isLive) {
+        await prisma.broadcastRecipient.update({
+          where: { id: recipient.id },
+          data: {
+            status: "SIMULATED",
+            sentAt: new Date(),
+            error: null
           }
-        }
-      });
-      simulatedCount += 1;
-      continue;
-    }
+        });
+        await prisma.whatsAppWebhookEvent.create({
+          data: {
+            broadcastId: campaignId,
+            recipientId: recipient.id,
+            leadId: recipient.leadId,
+            eventType: "simulated",
+            payload: {
+              note: "Demo mode — not sent to Meta API. Configure WHATSAPP_ACCESS_TOKEN for real delivery.",
+              messageType,
+              mediaUrl: mediaUrl || null,
+              manualUrl: buildManualSendLinks([recipient.phone], body)[0]?.url
+            }
+          }
+        });
+        simulatedCount += 1;
+        continue;
+      }
 
-    const result = await sendViaActiveProvider({
-      phone: recipient.phone,
-      name: recipient.name,
-      messageType,
-      text: body,
-      mediaUrl,
-      delivery
+      let result: Awaited<ReturnType<typeof sendViaActiveProvider>>;
+      try {
+        result = await sendViaActiveProvider({
+          phone: recipient.phone,
+          name: recipient.name,
+          messageType,
+          text: body,
+          mediaUrl,
+          delivery
+        });
+      } catch (sendError) {
+        const errMsg = sendError instanceof Error ? sendError.message : "Send failed";
+        await prisma.broadcastRecipient.update({
+          where: { id: recipient.id },
+          data: { status: "FAILED", error: errMsg }
+        });
+        await prisma.whatsAppWebhookEvent.create({
+          data: {
+            broadcastId: campaignId,
+            recipientId: recipient.id,
+            leadId: recipient.leadId,
+            eventType: "failed",
+            payload: { error: errMsg, deliveryMethod: delivery.deliveryMethod }
+          }
+        });
+        failedCount += 1;
+        errors.push({ phone: recipient.phone, error: errMsg });
+        await new Promise((resolve) => setTimeout(resolve, 320));
+        continue;
+      }
+
+      if (result.ok && result.messageId) {
+        await prisma.broadcastRecipient.update({
+          where: { id: recipient.id },
+          data: {
+            status: "SUBMITTED",
+            externalId: result.messageId,
+            sentAt: new Date(),
+            error: null
+          }
+        });
+        await prisma.whatsAppWebhookEvent.create({
+          data: {
+            broadcastId: campaignId,
+            recipientId: recipient.id,
+            leadId: recipient.leadId,
+            eventType: "submitted",
+            waMessageId: result.messageId,
+            payload: {
+              messageId: result.messageId,
+              deliveryMethod: delivery.deliveryMethod,
+              templateName: delivery.templateName
+            }
+          }
+        });
+        sentCount += 1;
+      } else {
+        await prisma.broadcastRecipient.update({
+          where: { id: recipient.id },
+          data: {
+            status: "FAILED",
+            error: result.error || "Send failed"
+          }
+        });
+        await prisma.whatsAppWebhookEvent.create({
+          data: {
+            broadcastId: campaignId,
+            recipientId: recipient.id,
+            leadId: recipient.leadId,
+            eventType: "failed",
+            payload: { error: result.error, deliveryMethod: delivery.deliveryMethod }
+          }
+        });
+        failedCount += 1;
+        errors.push({ phone: recipient.phone, error: result.error || "Send failed" });
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, 320));
+    }
+  } catch (loopError) {
+    // Unexpected error mid-loop — mark campaign FAILED so it doesn't stay stuck in SENDING
+    const errMsg = loopError instanceof Error ? loopError.message : "Unexpected send error";
+    await prisma.broadcast.update({
+      where: { id: campaignId },
+      data: {
+        status: "FAILED",
+        failedCount: failedCount + (campaign.recipients.length - sentCount - failedCount - simulatedCount),
+        completedAt: new Date()
+      }
     });
-
-    if (result.ok && result.messageId) {
-      await prisma.broadcastRecipient.update({
-        where: { id: recipient.id },
-        data: {
-          status: "SUBMITTED",
-          externalId: result.messageId,
-          sentAt: new Date(),
-          error: null
-        }
-      });
-      await prisma.whatsAppWebhookEvent.create({
-        data: {
-          broadcastId: campaignId,
-          recipientId: recipient.id,
-          leadId: recipient.leadId,
-          eventType: "submitted",
-          waMessageId: result.messageId,
-          payload: {
-            messageId: result.messageId,
-            deliveryMethod: delivery.deliveryMethod,
-            templateName: delivery.templateName
-          }
-        }
-      });
-      sentCount += 1;
-    } else {
-      await prisma.broadcastRecipient.update({
-        where: { id: recipient.id },
-        data: {
-          status: "FAILED",
-          error: result.error || "Send failed"
-        }
-      });
-      await prisma.whatsAppWebhookEvent.create({
-        data: {
-          broadcastId: campaignId,
-          recipientId: recipient.id,
-          leadId: recipient.leadId,
-          eventType: "failed",
-          payload: { error: result.error, deliveryMethod: delivery.deliveryMethod }
-        }
-      });
-      failedCount += 1;
-      errors.push({ phone: recipient.phone, error: result.error || "Send failed" });
-    }
-
-    await new Promise((resolve) => setTimeout(resolve, 320));
+    throw new Error(`Broadcast failed mid-send: ${errMsg}`);
   }
 
   if (campaign.mode !== mode) {
@@ -325,6 +379,12 @@ export async function reconcileCampaignStats() {
       status = campaign.scheduledAt ? "SCHEDULED" : "DRAFT";
     } else if (sentCount > 0 && (status === "DRAFT" || status === "SCHEDULED")) {
       status = "SENT";
+    } else if (status === "SENDING") {
+      // Recover campaigns stuck in SENDING (e.g. crashed mid-loop)
+      if (sentCount > 0 && failedCount > 0) status = "PARTIAL";
+      else if (sentCount > 0) status = "SENT";
+      else if (failedCount > 0 && queuedCount === 0) status = "FAILED";
+      else if (queuedCount > 0) status = "DRAFT"; // never actually ran — reset so user can retry
     }
 
     await prisma.broadcast.update({
@@ -336,11 +396,29 @@ export async function reconcileCampaignStats() {
   return { updated };
 }
 
+export async function cancelCampaign(id: string) {
+  const campaign = await prisma.broadcast.findUnique({ where: { id } });
+  if (!campaign) throw new Error("Campaign not found");
+  if (campaign.status === "CANCELLED") throw new Error("Campaign is already cancelled.");
+  if (campaign.status === "SENT") throw new Error("Campaign already fully sent — cannot cancel.");
+
+  const [updated] = await prisma.$transaction([
+    prisma.broadcast.update({
+      where: { id },
+      data: { status: "CANCELLED", completedAt: new Date() }
+    }),
+    // Kill any recipients still waiting in the queue
+    prisma.broadcastRecipient.updateMany({
+      where: { broadcastId: id, status: "QUEUED" },
+      data: { status: "FAILED", error: "Cancelled by user" }
+    })
+  ]);
+  return updated;
+}
+
+/** @deprecated use cancelCampaign */
 export async function cancelScheduledCampaign(id: string) {
-  return prisma.broadcast.update({
-    where: { id },
-    data: { status: "CANCELLED" }
-  });
+  return cancelCampaign(id);
 }
 
 export async function processDueScheduledCampaigns() {

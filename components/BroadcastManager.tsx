@@ -20,7 +20,7 @@ import {
   Users,
   Zap
 } from "lucide-react";
-import { BROADCAST_TEMPLATES, filterLeadsForAudience, type BroadcastAudience } from "../lib/broadcast";
+import { BROADCAST_TEMPLATES, filterLeadsForAudience, type BroadcastAudience, type LeadForAudience } from "../lib/broadcast";
 import { buildManualWhatsAppUrl, personalizeBroadcastMessage } from "../lib/whatsapp-cloud";
 import type { BrandSettings } from "../lib/brand-settings";
 
@@ -148,7 +148,7 @@ export default function BroadcastManager({ settings, leads }: BroadcastManagerPr
   const leadsWithPhone = useMemo(() => leads.filter((lead) => lead.phone?.trim()), [leads]);
 
   const audienceLeads = useMemo(
-    () => filterLeadsForAudience(leads, audience, selectedLeadIds),
+    () => filterLeadsForAudience(leads as LeadForAudience[], audience, selectedLeadIds),
     [leads, audience, selectedLeadIds]
   );
 

@@ -50,8 +50,10 @@ export async function createQuickSendCampaign(input: QuickSendInput) {
 
   const mode = getCampaignMode();
   const sendNow = Boolean(input.sendNow);
+  const providerEnv = process.env.WHATSAPP_PROVIDER?.trim();
   const deliveryMethod =
-    input.deliveryMethod || (process.env.WHATSAPP_PROVIDER?.trim() === "green-api" ? "session" : "template");
+    input.deliveryMethod ||
+    (providerEnv === "green-api" || providerEnv === "evolution" ? "session" : "template");
   const templateName =
     input.templateName?.trim() || process.env.WHATSAPP_TEMPLATE_NAME?.trim() || "hello_world";
   const templateLanguage =

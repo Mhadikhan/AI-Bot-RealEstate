@@ -1,0 +1,12 @@
+{
+  "buildCommand": "npx prisma generate && next build",
+  "framework": "nextjs",
+  "regions": ["sin1"],
+  "functions": {
+    "app/api/whatsapp/campaigns/route.ts": { "maxDuration": 300 },
+    "app/api/whatsapp/campaigns/[id]/send/route.ts": { "maxDuration": 300 },
+    "app/api/broadcasts/route.ts": { "maxDuration": 300 },
+    "app/api/broadcasts/[id]/send/route.ts": { "maxDuration": 300 },
+    "app/api/whatsapp/automation/run/route.ts": { "maxDuration": 300 }
+  }
+}

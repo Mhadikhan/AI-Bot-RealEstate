@@ -41,7 +41,7 @@ export default function QuickSendPanel({
   const [deliveryMethod, setDeliveryMethod] = useState<DeliveryMethod>("template");
   const [templateName, setTemplateName] = useState("hello_world");
   const [templateLanguage, setTemplateLanguage] = useState("en_US");
-  const [message, setMessage] = useState("Hi {{name}}, check out our latest property update from PropertyConnect AI.");
+  const [message, setMessage] = useState("Hi {{name}}, check out our latest property update from RealEstateworkeasy.");
   const [phoneList, setPhoneList] = useState("");
   const [mediaUrl, setMediaUrl] = useState("");
   const [mediaPreview, setMediaPreview] = useState("");
@@ -53,6 +53,7 @@ export default function QuickSendPanel({
   const [greenAllowedPhones, setGreenAllowedPhones] = useState<string[]>([]);
   const [manualLinks, setManualLinks] = useState<ManualLink[]>([]);
   const [testing, setTesting] = useState(false);
+  const sendInFlight = React.useRef(false);
   const testPhone = process.env.NEXT_PUBLIC_WHATSAPP_NUMBER || "+923412879311";
 
   const phoneCount = useMemo(() => {
@@ -84,7 +85,9 @@ export default function QuickSendPanel({
         }
         if (data.health) {
           setHealth(data.health);
-          if (data.health.provider === "green-api") setDeliveryMethod("session");
+          if (data.health.provider === "green-api" || data.health.provider === "evolution") {
+            setDeliveryMethod("session");
+          }
         }
         if (Array.isArray(data.greenApiAllowedPhones)) setGreenAllowedPhones(data.greenApiAllowedPhones);
       })
@@ -140,8 +143,8 @@ export default function QuickSendPanel({
         body: JSON.stringify({
           phone: testPhone,
           messageType: "TEXT",
-          message: message.slice(0, 200) || "Test from PropertyConnect AI",
-          deliveryMethod: health?.provider === "green-api" ? "session" : deliveryMethod,
+          message: message.slice(0, 200) || "Test from RealEstateworkeasy",
+          deliveryMethod: (health?.provider === "green-api" || health?.provider === "evolution") ? "session" : deliveryMethod,
           templateName,
           templateLanguage
         })
@@ -165,6 +168,7 @@ export default function QuickSendPanel({
   }
 
   async function send() {
+    if (sendInFlight.current) return; // prevent double-click duplicates
     const count = previewCount ?? phoneCount;
     if (count === 0) {
       toast.error("Add at least one valid phone number.");
@@ -179,6 +183,7 @@ export default function QuickSendPanel({
       return;
     }
 
+    sendInFlight.current = true;
     onSendingChange(true);
     setManualLinks([]);
     try {
@@ -193,7 +198,9 @@ export default function QuickSendPanel({
           phoneList,
           sendNow: true,
           deliveryMethod:
-            platform?.mode === "LIVE" && health?.provider === "green-api" ? "session" : deliveryMethod,
+            platform?.mode === "LIVE" && (health?.provider === "green-api" || health?.provider === "evolution")
+              ? "session"
+              : deliveryMethod,
           templateName,
           templateLanguage
         })
@@ -216,22 +223,27 @@ export default function QuickSendPanel({
           data.summary?.errors?.[0]?.error ||
           data.campaign?.recipients?.find((r: { status: string; error?: string }) => r.status === "FAILED")
             ?.error;
-        const via = data.summary?.provider === "green-api" ? "Green API" : "Meta";
+        const providerLabel =
+          data.summary?.provider === "green-api" ? "Green API" :
+          data.summary?.provider === "evolution" ? "Evolution API" : "WhatsApp";
         const shortErr =
           errDetail && errDetail.length > 220 ? `${errDetail.slice(0, 220)}…` : errDetail;
         toast.error(
           shortErr
-            ? `Send failed (${via}): ${shortErr}`
-            : `All ${failed} failed via ${via}. Restart npm run dev after editing .env.`
+            ? `Send failed (${providerLabel}): ${shortErr}`
+            : `All ${failed} failed via ${providerLabel}. Check Docker is running and WhatsApp is connected.`
         );
       } else {
-        const via = data.summary?.provider === "green-api" ? "Green API" : "WhatsApp";
+        const via =
+          data.summary?.provider === "green-api" ? "Green API" :
+          data.summary?.provider === "evolution" ? "Evolution API" : "WhatsApp";
         toast.success(`Sent ${sent || simulated} message(s) via ${via}.`);
         onSent();
       }
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Send failed");
     } finally {
+      sendInFlight.current = false;
       onSendingChange(false);
     }
   }
@@ -307,7 +319,14 @@ export default function QuickSendPanel({
           {health?.provider && health.provider !== "none" && (
             <>
               {" "}
-              · Service: <strong>{health.provider === "green-api" ? "Green API" : "Meta"}</strong>
+              · Service:{" "}
+              <strong>
+                {health.provider === "green-api"
+                  ? "Green API"
+                  : health.provider === "evolution"
+                    ? "Evolution API"
+                    : "Meta"}
+              </strong>
               {health.connected ? " ✓ connected" : " — scan QR / check .env"}
             </>
           )}
@@ -339,7 +358,7 @@ export default function QuickSendPanel({
             Session (24h window)
           </button>
         </div>
-        {deliveryMethod === "template" && (
+        {deliveryMethod === "template" && health?.provider !== "evolution" && (
           <div className="mt-3 grid gap-2 sm:grid-cols-2">
             <div>
               <label className="text-[10px] font-bold uppercase text-slate-400">Template name</label>
@@ -360,6 +379,11 @@ export default function QuickSendPanel({
               />
             </div>
           </div>
+        )}
+        {health?.provider === "evolution" && (
+          <p className="mt-2 rounded-lg bg-blue-50 px-3 py-2 text-xs text-blue-800">
+            Evolution API sends direct session messages — no Meta template approval needed.
+          </p>
         )}
         {setup?.testNumberHint && (
           <p className="mt-2 text-[10px] text-slate-500">{setup.testNumberHint}</p>
@@ -502,7 +526,44 @@ export default function QuickSendPanel({
           className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm"
         />
 
-        <label className="mt-4 block text-xs font-bold uppercase text-slate-400">Phone numbers</label>
+        <div className="mt-4 flex items-center justify-between gap-2">
+          <label className="text-xs font-bold uppercase text-slate-400">Phone numbers</label>
+          <label className="flex cursor-pointer items-center gap-1.5 rounded-xl border border-emerald-300 bg-emerald-50 px-3 py-1.5 text-xs font-bold text-emerald-800 hover:bg-emerald-100 transition-colors">
+            <Upload className="h-3.5 w-3.5" />
+            Import .vcf
+            <input
+              type="file"
+              accept=".vcf,text/vcard,text/x-vcard"
+              className="hidden"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (!file) return;
+                const reader = new FileReader();
+                reader.onload = (ev) => {
+                  const text = ev.target?.result as string;
+                  // Extract all phone numbers from VCF — prefer waid= (already E.164 digits), fallback to TEL value
+                  const phones: string[] = [];
+                  const waidMatches = text.matchAll(/waid=(\d{7,15})/gi);
+                  for (const m of waidMatches) phones.push(m[1]);
+                  if (phones.length === 0) {
+                    // Fallback: grab raw TEL values
+                    const telMatches = text.matchAll(/^TEL[^:]*:(.+)$/gim);
+                    for (const m of telMatches) {
+                      const digits = m[1].replace(/\D/g, "");
+                      if (digits.length >= 10) phones.push(digits);
+                    }
+                  }
+                  const deduped = [...new Set(phones)];
+                  const toAdd = deduped.join("\n");
+                  setPhoneList((prev) => (prev.trim() ? `${prev.trim()}\n${toAdd}` : toAdd));
+                  toast.success(`Imported ${deduped.length} number(s) from ${file.name}`);
+                };
+                reader.readAsText(file);
+                e.target.value = "";
+              }}
+            />
+          </label>
+        </div>
         <textarea
           value={phoneList}
           onChange={(e) => setPhoneList(e.target.value)}
@@ -515,7 +576,7 @@ export default function QuickSendPanel({
           }
         />
         <p className="mt-1 text-xs text-slate-500">
-          {previewCount !== null ? `${previewCount} valid number(s)` : "One per line or comma-separated"}
+          {previewCount !== null ? `${previewCount} valid number(s)` : "One per line or comma-separated · or import a .vcf contacts file"}
         </p>
 
         <button

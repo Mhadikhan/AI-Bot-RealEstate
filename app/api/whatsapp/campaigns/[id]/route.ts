@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "../../../../../lib/prisma";
 import {
-  cancelScheduledCampaign,
+  cancelCampaign,
   getCampaign,
   getCampaignAnalytics
 } from "../../../../../lib/whatsapp/campaigns";
@@ -42,7 +42,7 @@ export async function PATCH(request: Request, { params }: Params) {
     const { id } = await params;
     const body = await request.json();
     if (body.action === "cancel") {
-      const campaign = await cancelScheduledCampaign(id);
+      const campaign = await cancelCampaign(id);
       return NextResponse.json(campaign);
     }
     return NextResponse.json({ error: "Unknown action" }, { status: 400 });

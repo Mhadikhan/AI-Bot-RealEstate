@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { executeCampaignSend } from "../../../../../../lib/whatsapp/campaigns";
 
+export const maxDuration = 300;
+
 type Params = { params: Promise<{ id: string }> };
 
 export async function POST(_request: Request, { params }: Params) {

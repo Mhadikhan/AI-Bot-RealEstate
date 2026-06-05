@@ -17,6 +17,8 @@ export type WhatsAppPlatformStatus = {
   webhookUrl: string;
   evolutionWebhookUrl: string;
   demo: boolean;
+  greenApiInstanceId: string | null;
+  greenApiTokenSet: boolean;
 };
 
 export function isWhatsAppLiveMode() {
@@ -47,6 +49,8 @@ export function getWhatsAppStatus(baseUrl?: string): WhatsAppPlatformStatus {
     evolutionWebhookUrl:
       process.env.EVOLUTION_WEBHOOK_URL?.trim() ||
       `${origin.replace(/\/$/, "")}/api/webhooks/evolution`,
-    demo: provider.id === "demo"
+    demo: provider.id === "demo",
+    greenApiInstanceId: process.env.GREEN_API_INSTANCE_ID?.trim() || null,
+    greenApiTokenSet: Boolean(process.env.GREEN_API_API_TOKEN?.trim())
   };
 }

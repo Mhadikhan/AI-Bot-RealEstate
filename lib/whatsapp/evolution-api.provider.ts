@@ -233,13 +233,33 @@ export class EvolutionApiProvider implements WhatsAppProvider {
 
   private async resolveMediaPayload(input: SendMediaInput) {
     if (input.base64) return { media: input.base64 };
-    if (input.mediaUrl?.startsWith("http")) return { media: input.mediaUrl };
 
-    if (input.mediaUrl?.startsWith("/")) {
-      const filePath = path.join(process.cwd(), "public", input.mediaUrl.replace(/^\//, ""));
+    const url = input.mediaUrl?.trim();
+    if (!url) throw new EvolutionMediaSendError("Media URL or base64 is required.");
+
+    // Local path — read from disk as base64
+    if (url.startsWith("/")) {
+      const filePath = path.join(process.cwd(), "public", url.replace(/^\//, ""));
       const buffer = await readFile(filePath);
       return { media: buffer.toString("base64") };
     }
+
+    // localhost / 127.0.0.1 URLs can't be reached from inside Docker.
+    // Resolve to disk path (public/...) and send as base64.
+    if (/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?\//.test(url)) {
+      try {
+        const pathname = new URL(url).pathname;
+        const filePath = path.join(process.cwd(), "public", pathname.replace(/^\//, ""));
+        const buffer = await readFile(filePath);
+        return { media: buffer.toString("base64") };
+      } catch {
+        // File not found on disk — try host.docker.internal so Docker can reach the dev server
+        const dockerUrl = url.replace(/^https?:\/\/(localhost|127\.0\.0\.1)/, "http://host.docker.internal");
+        return { media: dockerUrl };
+      }
+    }
+
+    if (url.startsWith("http")) return { media: url };
 
     throw new EvolutionMediaSendError("Media URL or base64 is required.");
   }

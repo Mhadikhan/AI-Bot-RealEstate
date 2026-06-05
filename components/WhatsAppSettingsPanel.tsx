@@ -139,32 +139,49 @@ export default function WhatsAppSettingsPanel({ primary }: { primary: string }) 
 
   return (
     <div className="space-y-6">
-      {status?.evolutionReachable === false && (
-        <div className="rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-900">
-          <p className="font-bold">Evolution API not reachable</p>
-          <p className="mt-2 whitespace-pre-wrap">{status.evolutionError}</p>
-          <p className="mt-2 font-semibold">{status.evolutionHint}</p>
-          <pre className="mt-3 overflow-x-auto rounded-lg bg-red-100/80 p-3 text-xs">
-            docker compose -f docker-compose.evolution.yml up -d
-          </pre>
+      {/* One-time setup guide — shown when Docker/Evolution API is not running */}
+      {(status?.evolutionReachable === false || isDemo) && (
+        <div className="rounded-2xl border-2 border-emerald-300 bg-emerald-50 p-5">
+          <div className="mb-4 flex items-center gap-2">
+            <div className="flex h-7 w-7 items-center justify-center rounded-full bg-emerald-600 text-sm font-bold text-white">✓</div>
+            <p className="font-extrabold text-emerald-900">
+              Evolution API — 100% Free WhatsApp (self-hosted, no subscription)
+            </p>
+          </div>
+          <ol className="list-decimal space-y-3 pl-5 text-sm text-slate-800">
+            <li>
+              <strong>Install Docker Desktop</strong> — download free from{" "}
+              <code className="rounded bg-slate-100 px-1 text-xs">docker.com/products/docker-desktop</code>{" "}
+              and install it (Windows/Mac/Linux supported)
+            </li>
+            <li>
+              <strong>Open a terminal in this project folder</strong> and run:
+              <pre className="mt-1.5 overflow-x-auto rounded-xl bg-slate-800 p-3 text-xs text-green-300">
+                docker compose -f docker-compose.evolution.yml up -d
+              </pre>
+              <span className="mt-1 block text-xs text-slate-500">
+                This starts Evolution API on port 8080. Wait ~30 seconds for it to be ready.
+              </span>
+            </li>
+            <li>
+              Come back here and click <strong>Create Instance</strong> below
+            </li>
+            <li>
+              Click <strong>Generate QR Code</strong> → scan with your WhatsApp phone
+            </li>
+            <li>
+              Status will change to <span className="font-bold text-emerald-700">CONNECTED</span> — done!
+              All broadcasts will now send as real WhatsApp messages.
+            </li>
+          </ol>
+          {status?.evolutionReachable === false && (
+            <div className="mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-xs">
+              <p className="font-bold text-red-800">Docker is not running or Evolution API is unreachable</p>
+              <p className="mt-1 text-red-700">{status.evolutionHint || status.evolutionError}</p>
+            </div>
+          )}
         </div>
       )}
-      {isDemo && (
-        <div className="rounded-2xl border border-amber-300 bg-amber-50 p-5">
-          <p className="font-bold text-amber-900">Demo Mode — Evolution API is not connected.</p>
-          <p className="mt-2 text-sm text-amber-900/90">
-            Start Docker (<code>docker compose -f docker-compose.evolution.yml up -d</code>), copy{" "}
-            <code>.env.evolution.example</code> → <code>.env.evolution</code>, set matching keys in{" "}
-            <code>.env</code>, then create an instance and scan the QR code.
-          </p>
-        </div>
-      )}
-
-      <div className="rounded-2xl border border-amber-200 bg-amber-50/60 p-4 text-sm text-amber-950">
-        <strong>Testing notice:</strong> Use a separate WhatsApp test number. WHATSAPP-BAILEYS relies on
-        WhatsApp Web and has limitations vs the official Meta WhatsApp Business API. For high-volume
-        production, switch to <code>WHATSAPP_PROVIDER=meta</code>.
-      </div>
 
       <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
         <div className="flex flex-wrap items-start justify-between gap-4">

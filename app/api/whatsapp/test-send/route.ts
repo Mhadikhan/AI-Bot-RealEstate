@@ -7,7 +7,7 @@ import { buildManualWhatsAppUrl } from "../../../../lib/whatsapp-cloud";
 const schema = z.object({
   phone: z.string().min(10),
   messageType: z.enum(["TEXT", "IMAGE", "VIDEO"]).optional().default("TEXT"),
-  message: z.string().optional().default("Hello from PropertyConnect AI"),
+  message: z.string().optional().default("Hello from RealEstateworkeasy"),
   mediaUrl: z.string().optional().nullable(),
   deliveryMethod: z.enum(["template", "session"]).optional().default("template"),
   templateName: z.string().optional(),

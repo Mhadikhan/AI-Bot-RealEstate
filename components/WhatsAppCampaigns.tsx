@@ -38,7 +38,8 @@ import {
   CAMPAIGN_CATEGORY_LABELS,
   filterLeadsForAudience,
   type BroadcastAudience,
-  type CampaignCategory
+  type CampaignCategory,
+  type LeadForAudience
 } from "../lib/broadcast";
 import type { BrandSettings } from "../lib/brand-settings";
 import AudienceFilterPanel from "./AudienceFilterPanel";
@@ -75,10 +76,12 @@ type LeadRow = {
 type PlatformStatus = {
   configured: boolean;
   mode: "LIVE" | "DEMO";
-  provider?: "meta" | "green-api" | "none";
+  provider?: "meta" | "green-api" | "evolution" | "none";
   providerLabel?: string;
   webhookUrl: string;
   verifyTokenSet: boolean;
+  greenApiInstanceId?: string | null;
+  greenApiTokenSet?: boolean;
 };
 
 type Campaign = {
@@ -100,6 +103,7 @@ type Campaign = {
   sentAt: string | null;
   createdAt: string;
   followUpSequence?: { id: string; name: string } | null;
+  recipients?: { id: string; status: string; phone: string; error?: string | null }[];
 };
 
 type InboundMsg = {
@@ -110,7 +114,7 @@ type InboundMsg = {
   aiReply: string | null;
   requiresAgent: boolean;
   createdAt: string;
-  lead?: { name: string | null; phone: string | null; temperature: string } | null;
+  lead?: { name: string | null; phone: string | null; temperature: string; type?: string } | null;
 };
 
 type FollowUpSeq = {
@@ -250,18 +254,19 @@ export default function WhatsAppCampaigns({
 
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
+  const sendInFlight = React.useRef(false);
   const [copied, setCopied] = useState(false);
   const toast = useToast();
 
   const audienceLeads = useMemo(
-    () => filterLeadsForAudience(leads, audience, selectedLeadIds, { requireOptIn: true }),
+    () => filterLeadsForAudience(leads as LeadForAudience[], audience, selectedLeadIds, { requireOptIn: true }),
     [leads, audience, selectedLeadIds]
   );
 
   const segmentCounts = useMemo(() => {
     const counts: Record<string, number> = {};
     for (const id of SEGMENT_IDS) {
-      counts[id] = filterLeadsForAudience(leads, id, [], { requireOptIn: true }).length;
+      counts[id] = filterLeadsForAudience(leads as LeadForAudience[], id, [], { requireOptIn: true }).length;
     }
     return counts;
   }, [leads]);
@@ -471,7 +476,31 @@ export default function WhatsAppCampaigns({
     }
   }
 
+  async function stopCampaign(id: string) {
+    if (sendInFlight.current) return;
+    sendInFlight.current = true;
+    setSending(true);
+    try {
+      const res = await fetch(`/api/whatsapp/campaigns/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "cancel" })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Cancel failed");
+      toast.success("Campaign stopped — all queued messages cancelled.");
+      await loadAll();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Cancel failed");
+    } finally {
+      sendInFlight.current = false;
+      setSending(false);
+    }
+  }
+
   async function sendCampaignNow(id: string) {
+    if (sendInFlight.current) return;
+    sendInFlight.current = true;
     setSending(true);
     try {
       const res = await fetch(`/api/whatsapp/campaigns/${id}/send`, { method: "POST" });
@@ -487,6 +516,7 @@ export default function WhatsAppCampaigns({
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Send failed");
     } finally {
+      sendInFlight.current = false;
       setSending(false);
     }
   }
@@ -623,6 +653,8 @@ export default function WhatsAppCampaigns({
               onSearch={setHistorySearch}
               activeId={activeId}
               onSelect={setActiveId}
+              sending={sending}
+              onStop={stopCampaign}
               onOpenAnalytics={(id) => {
                 setActiveId(id);
                 setSection("analytics");
@@ -661,6 +693,7 @@ export default function WhatsAppCampaigns({
               sending={sending}
               onRunAutomation={runAutomation}
               onSendNow={sendCampaignNow}
+              onStop={stopCampaign}
               onSelect={setActiveId}
             />
           )}
@@ -972,6 +1005,8 @@ function CreateBroadcastPanel(props: {
   );
 }
 
+const STOPPABLE = new Set(["DRAFT", "SCHEDULED", "SENDING", "PARTIAL", "QUEUED"]);
+
 function CampaignHistoryPanel({
   campaigns,
   totalCount,
@@ -979,6 +1014,8 @@ function CampaignHistoryPanel({
   onSearch,
   activeId,
   onSelect,
+  sending,
+  onStop,
   onOpenAnalytics
 }: {
   campaigns: Campaign[];
@@ -987,6 +1024,8 @@ function CampaignHistoryPanel({
   onSearch: (v: string) => void;
   activeId: string | null;
   onSelect: (id: string) => void;
+  sending: boolean;
+  onStop: (id: string) => void;
   onOpenAnalytics: (id: string) => void;
 }) {
   const query = search.trim();
@@ -1050,6 +1089,16 @@ function CampaignHistoryPanel({
               </button>
               <div className="flex items-center gap-2">
                 <StatusBadge status={c.status} mode={c.mode} />
+                {STOPPABLE.has(c.status) && (
+                  <button
+                    type="button"
+                    disabled={sending}
+                    onClick={() => onStop(c.id)}
+                    className="rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-bold text-red-700 hover:bg-red-100 disabled:opacity-50"
+                  >
+                    Stop
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={() => onOpenAnalytics(c.id)}
@@ -1066,6 +1115,17 @@ function CampaignHistoryPanel({
   );
 }
 
+const TEMPLATES_STORAGE_KEY = "reworkeasy_custom_templates";
+
+function loadCustomTemplates(): Record<string, string> {
+  if (typeof window === "undefined") return {};
+  try { return JSON.parse(localStorage.getItem(TEMPLATES_STORAGE_KEY) || "{}"); } catch { return {}; }
+}
+
+function saveCustomTemplates(data: Record<string, string>) {
+  localStorage.setItem(TEMPLATES_STORAGE_KEY, JSON.stringify(data));
+}
+
 function TemplatesPanel({
   settings,
   selectedCategory,
@@ -1075,35 +1135,137 @@ function TemplatesPanel({
   selectedCategory: CampaignCategory;
   onUse: (t: (typeof BROADCAST_TEMPLATES)[number]) => void;
 }) {
+  const [customMessages, setCustomMessages] = React.useState<Record<string, string>>({});
+  const [editingId, setEditingId] = React.useState<string | null>(null);
+  const [draft, setDraft] = React.useState("");
+  const [savedId, setSavedId] = React.useState<string | null>(null);
+
+  React.useEffect(() => {
+    setCustomMessages(loadCustomTemplates());
+  }, []);
+
+  function startEdit(id: string, current: string) {
+    setEditingId(id);
+    setDraft(current);
+  }
+
+  function saveEdit(id: string) {
+    const updated = { ...customMessages, [id]: draft };
+    setCustomMessages(updated);
+    saveCustomTemplates(updated);
+    setEditingId(null);
+    setSavedId(id);
+    setTimeout(() => setSavedId(null), 1500);
+  }
+
+  function resetTemplate(id: string) {
+    const updated = { ...customMessages };
+    delete updated[id];
+    setCustomMessages(updated);
+    saveCustomTemplates(updated);
+    setEditingId(null);
+  }
+
   return (
     <div className="space-y-4">
-      <PanelHeader title="Message Templates" subtitle="12 real-estate campaign types with {{name}} personalization" />
+      <PanelHeader
+        title="Message Templates"
+        subtitle="12 real-estate campaign types — click Edit to customise any template. Changes are saved in your browser."
+      />
       <div className="grid gap-4 sm:grid-cols-2">
-        {BROADCAST_TEMPLATES.map((t) => (
-          <div
-            key={t.id}
-            className={`rounded-2xl border bg-white p-4 shadow-sm ${
-              selectedCategory === t.category ? "border-amber-300 ring-1 ring-amber-200" : "border-slate-200"
-            }`}
-          >
-            <div className="font-extrabold text-slate-900">{CAMPAIGN_CATEGORY_LABELS[t.category]}</div>
-            <p className="mt-1 text-xs text-slate-500">{t.description}</p>
-            <p className="mt-3 rounded-xl bg-slate-50 p-3 text-xs leading-relaxed text-slate-700">{t.message}</p>
-            <div className="mt-3 flex items-center justify-between">
-              <span className="text-[10px] font-bold text-slate-400">
-                Default: {AUDIENCE_LABELS[t.defaultAudience]}
-              </span>
-              <button
-                type="button"
-                onClick={() => onUse(t)}
-                className="rounded-lg px-3 py-1.5 text-xs font-bold text-white"
-                style={{ background: settings.primary }}
-              >
-                Use in broadcast
-              </button>
+        {BROADCAST_TEMPLATES.map((t) => {
+          const currentMessage = customMessages[t.id] ?? t.message;
+          const isModified = Boolean(customMessages[t.id]);
+          const isEditing = editingId === t.id;
+
+          return (
+            <div
+              key={t.id}
+              className={`rounded-2xl border bg-white p-4 shadow-sm ${
+                selectedCategory === t.category ? "border-amber-300 ring-1 ring-amber-200" : "border-slate-200"
+              }`}
+            >
+              <div className="flex items-start justify-between gap-2">
+                <div>
+                  <div className="font-extrabold text-slate-900">{CAMPAIGN_CATEGORY_LABELS[t.category]}</div>
+                  <p className="mt-0.5 text-xs text-slate-500">{t.description}</p>
+                </div>
+                {isModified && !isEditing && (
+                  <span className="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-700">
+                    Edited
+                  </span>
+                )}
+              </div>
+
+              {isEditing ? (
+                <div className="mt-3 space-y-2">
+                  <textarea
+                    value={draft}
+                    onChange={(e) => setDraft(e.target.value)}
+                    rows={5}
+                    autoFocus
+                    className="w-full resize-none rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-xs leading-relaxed text-slate-800 focus:outline-none focus:ring-2 focus:ring-amber-300"
+                  />
+                  <p className="text-[10px] text-slate-400">Use {"{{name}}"} for personalization</p>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => saveEdit(t.id)}
+                      className="rounded-lg px-3 py-1.5 text-xs font-bold text-white"
+                      style={{ background: settings.primary }}
+                    >
+                      Save
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setEditingId(null)}
+                      className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-bold text-slate-600"
+                    >
+                      Cancel
+                    </button>
+                    {isModified && (
+                      <button
+                        type="button"
+                        onClick={() => resetTemplate(t.id)}
+                        className="rounded-lg border border-red-200 px-3 py-1.5 text-xs font-bold text-red-600"
+                      >
+                        Reset to default
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <p className="mt-3 rounded-xl bg-slate-50 p-3 text-xs leading-relaxed text-slate-700">
+                    {currentMessage}
+                  </p>
+                  <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+                    <span className="text-[10px] font-bold text-slate-400">
+                      Default: {AUDIENCE_LABELS[t.defaultAudience]}
+                    </span>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => startEdit(t.id, currentMessage)}
+                        className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-bold text-slate-700 hover:bg-slate-50"
+                      >
+                        {savedId === t.id ? "Saved ✓" : "Edit"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => onUse({ ...t, message: currentMessage })}
+                        className="rounded-lg px-3 py-1.5 text-xs font-bold text-white"
+                        style={{ background: settings.primary }}
+                      >
+                        Use in broadcast
+                      </button>
+                    </div>
+                  </div>
+                </>
+              )}
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );
@@ -1153,12 +1315,14 @@ function ScheduledPanel({
   sending,
   onRunAutomation,
   onSendNow,
+  onStop,
   onSelect
 }: {
   campaigns: Campaign[];
   sending: boolean;
   onRunAutomation: () => void;
   onSendNow: (id: string) => void;
+  onStop: (id: string) => void;
   onSelect: (id: string) => void;
 }) {
   return (
@@ -1202,9 +1366,17 @@ function ScheduledPanel({
                   type="button"
                   disabled={sending}
                   onClick={() => onSendNow(c.id)}
-                  className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-bold text-white"
+                  className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-bold text-white disabled:opacity-50"
                 >
                   Send now
+                </button>
+                <button
+                  type="button"
+                  disabled={sending}
+                  onClick={() => onStop(c.id)}
+                  className="rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-bold text-red-700 hover:bg-red-100 disabled:opacity-50"
+                >
+                  Stop
                 </button>
                 <StatusBadge status={c.status} mode={c.mode} />
               </div>
@@ -1753,37 +1925,63 @@ function SettingsPanel({
           </ul>
         )}
 
-        <div className="mt-5 rounded-2xl border border-slate-200 bg-slate-50 p-4">
-          <p className="mb-3 text-xs font-bold uppercase text-slate-500">Meta setup checklist</p>
-          <ol className="list-decimal space-y-2 pl-5 text-sm text-slate-700">
+        {/* Green API Setup Guide */}
+        <div className="mt-5 rounded-2xl border-2 border-emerald-200 bg-emerald-50 p-4">
+          <div className="mb-3 flex items-center gap-2">
+            <div className="flex h-6 w-6 items-center justify-center rounded-full bg-emerald-600 text-xs font-bold text-white">✓</div>
+            <p className="text-sm font-bold text-emerald-900">
+              Green API — Free WhatsApp (no Docker, no Meta approval)
+            </p>
+          </div>
+          <ol className="list-decimal space-y-2.5 pl-5 text-sm text-slate-700">
             <li>
+              Go to{" "}
               <a
-                href="https://developers.facebook.com/apps/"
+                href="https://console.green-api.com"
                 target="_blank"
                 rel="noopener noreferrer"
-                className="font-semibold text-blue-600 underline"
+                className="font-bold text-emerald-700 underline"
               >
-                Meta Developer Console
+                console.green-api.com
               </a>{" "}
-              → your app → WhatsApp → Configuration
+              → Sign up free → Create a new instance
             </li>
             <li>
-              Callback URL: <code className="text-xs">{platform.webhookUrl}</code>
-            </li>
-            <li>Verify token: same value as <code>WHATSAPP_VERIFY_TOKEN</code> in `.env`</li>
-            <li>Subscribe to: <strong>messages</strong> (and message status if available)</li>
-            <li>
-              For local dev use ngrok: <code className="text-xs">{appUrl}</code> → public URL +{" "}
-              <code>/api/whatsapp/webhook</code>
+              In your instance dashboard, click <strong>Scan QR</strong> and scan with your WhatsApp phone
             </li>
             <li>
-              <strong>Easier:</strong>{" "}
-              <a href="https://green-api.com" target="_blank" rel="noopener noreferrer" className="text-blue-600 underline">
-                Green API
-              </a>{" "}
-              → set <code>GREEN_API_INSTANCE_ID</code> + <code>GREEN_API_API_TOKEN</code> in `.env` → scan QR
+              Copy your <strong>Instance ID</strong> and <strong>API Token</strong> from the dashboard
+            </li>
+            <li>
+              Open <code className="rounded bg-slate-100 px-1 text-xs">.env</code> and fill in:
+              <pre className="mt-2 rounded-xl bg-slate-800 p-3 text-xs text-green-300 overflow-x-auto">{`WHATSAPP_PROVIDER=green-api
+WHATSAPP_ENABLED=true
+GREEN_API_URL=https://XXXX.api.greenapi.com
+GREEN_API_INSTANCE_ID=XXXXXXXXXXXX
+GREEN_API_API_TOKEN=your-token-here`}</pre>
+            </li>
+            <li>
+              Restart the dev server: <code className="rounded bg-slate-100 px-1 text-xs">npm run dev</code>
+            </li>
+            <li>
+              Come back here and click <strong>Send real test</strong> below to verify it works
             </li>
           </ol>
+          {platform.provider === "green-api" && !platform.configured && platform.greenApiTokenSet === false && (
+            <div className="mt-3 rounded-xl bg-amber-100 px-3 py-2 text-xs font-semibold text-amber-800">
+              ⚠ Instance ID found but <code>GREEN_API_API_TOKEN</code> is empty in .env — paste your token and restart the server.
+            </div>
+          )}
+          {platform.provider === "green-api" && !platform.configured && !platform.greenApiInstanceId && (
+            <div className="mt-3 rounded-xl bg-amber-100 px-3 py-2 text-xs font-semibold text-amber-800">
+              ⚠ Green API not set up yet — follow the steps above to get your Instance ID and Token.
+            </div>
+          )}
+          {platform.provider === "green-api" && platform.configured && (
+            <div className="mt-3 rounded-xl bg-emerald-100 px-3 py-2 text-xs font-semibold text-emerald-800">
+              ✓ Green API is active — broadcasts will deliver via your WhatsApp number in real-time.
+            </div>
+          )}
         </div>
 
         <div className="mt-4 flex flex-wrap gap-2">
@@ -1801,15 +1999,14 @@ function SettingsPanel({
             onClick={testWebhookSimulate}
             className="rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-bold text-white hover:bg-emerald-700"
           >
-            {testing ? "Testing…" : "Test webhook (simulate inbound)"}
+            {testing ? "Testing…" : "Simulate inbound message"}
           </button>
         </div>
 
         <p className="mt-4 text-xs leading-relaxed text-slate-500">
-          <strong>DEMO:</strong> Use Conversations → Load demo / Simulate — no Meta account required.{" "}
-          <strong>LIVE:</strong> Set <code className="rounded bg-slate-100 px-1">WHATSAPP_ACCESS_TOKEN</code>,{" "}
-          <code className="rounded bg-slate-100 px-1">WHATSAPP_PHONE_NUMBER_ID</code>, and webhook fields in `.env`.
-          Real replies appear here automatically; AI sends WhatsApp text back when LIVE.
+          <strong>Free plan:</strong> 3-month trial, then ~$15/month for unlimited messages.{" "}
+          <strong>No Meta approval needed</strong> — uses your personal/business WhatsApp number directly.
+          Messages deliver as private 1-to-1 chats just like a broadcast list.
         </p>
       </div>
     </div>

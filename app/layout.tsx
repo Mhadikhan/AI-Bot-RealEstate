@@ -10,7 +10,7 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: "PropertyConnect AI",
+  title: "RealEstateworkeasy",
   description: "AI-powered Pakistan real estate — search listings, book viewings, and chat with your property advisor."
 };
 

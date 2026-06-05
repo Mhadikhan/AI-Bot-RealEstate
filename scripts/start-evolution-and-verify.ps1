@@ -3,6 +3,8 @@
 #   .\scripts\start-evolution-and-verify.ps1
 
 $ErrorActionPreference = "Stop"
+$dockerBin = "C:\Program Files\Docker\Docker\resources\bin"
+if (Test-Path $dockerBin) { $env:Path = "$dockerBin;$env:Path" }
 Set-Location $PSScriptRoot + "\.."
 
 Write-Host "Starting Evolution API stack..." -ForegroundColor Cyan
